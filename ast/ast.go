@@ -1,36 +1,42 @@
 package ast
 
-type Func struct {
-	Name string
-	Data []Value
-	Body []Stmt
-
-	// map id to Value
+type Node interface {
+	Debug() string
 }
 
-type Stmt struct {
+type Stmt interface {
+	Node
+}
+
+type Expr interface {
+	Node
+
+	Type() ValueType
+}
+
+type Block struct {
+	Scope []struct {
+		Beg int
+		End int
+	}
+
+	Body []Stmt
 }
 
 type Loop struct {
-	Stmt
+	Block
 
-	Body []Stmt
+	Cond Expr
 }
 
-type Expr struct {
-}
+type Branch struct {
+	Cond Expr
 
-type Cond struct {
-	Expr
+	Pos Block
+	Neg Block
 }
 
 type Call struct {
-	Expr
-
 	Name string
 	Args []Expr
-}
-
-type Const struct {
-	Expr
 }

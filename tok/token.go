@@ -64,11 +64,12 @@ const (
 
 	// Keywords
 
-	FUNC // func
-	FOR  // for
-	IF   // if
-	ELSE // else
-	RET  // return
+	FUNC  // func
+	FOR   // for
+	IF    // if
+	ELSE  // else
+	RET   // return
+	BREAK // break
 
 	// Predefined functions
 
@@ -82,4 +83,19 @@ type Token struct {
 	Col int
 	Lit string
 	Err error
+}
+
+var kwd = map[string]TokenType{
+	"func":   FUNC,
+	"for":    FOR,
+	"if":     IF,
+	"else":   ELSE,
+	"return": RET,
+	"break":  BREAK,
+	"print":  PRINT,
+}
+
+func AsKeyword(lit string) (TokenType, bool) {
+	tt, ok := kwd[lit]
+	return tt, ok
 }
