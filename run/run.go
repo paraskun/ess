@@ -4,84 +4,61 @@ import (
 	"unsafe"
 )
 
-type Heap struct {
-	Var []byte
-	Str []string
-
-	Call []Heap
+type FuncImage struct {
+	Name  string
+	ArgSz int
+	Call  []string
 }
 
-type Func struct {
-	Code []Command
+type callInfo struct {
+	frame
+}
+
+type Frame struct {
+	Var  []byte
+	Str  []string
+	Call []CallInfo
 }
 
 type Machine struct {
-	Func map[string]Func
-	Heap Heap
+	Func []FuncImage
 
-	ds []byte
-	ss []string
+	fs []*Frame
+	ip []int64
+	os []byte
 
-	pc []Command
-	cc []Command
-	ph *Heap
-	ch *Heap
-	ip int
-	rp int
+	fp unsafe.Pointer
+	op unsafe.Pointer
 }
 
-func (*Machine) Load(name string)
+func (m *Machine) Load(name string) {
+	// allocate frame
+	// fill addresses
+}
 
 func (m *Machine) Exec(args []byte) {
-	m.ch = &m.Heap
-	m.ip = 0
-
 	for {
 		cmd := m.cc[m.ip]
 
 		switch cmd {
 		case JMP:
-			m.ip += 1
-			m.ip = m.u32()
-
+			m.ip = m.cu32()
 			break
 		case JIF:
-			m.ip += 1
-			p := m.u32()
-
-			if m.sGetBol() {
-				m.ip = p
+			if *m.sgu08() != 0 {
+				m.ip = m.cu32()
 			}
 
 			break
-		case VADDR:
-			m.ip += 1
-			idx := m.u32()
-
-			m.sPutPtr((uintptr)(unsafe.Pointer(&m.ch.Var[idx])))
-
+		case ADDR:
+			m.spptr(&m.Data.Stack[m.cu32()])
 			break
 		case GET:
-			m.ip += 1
-
-			ix := m.u32()
-			sz := m.u8()
-
-			m.ds = append(m.ds, m.ch.Var[ix:(ix+sz)]...)
+			ix := m.cu32()
+			sz := m.cu08()
 
 			break
 		case PUT:
-			m.ip += 1
-
-			ix := m.u32()
-			sz := m.u8()
-
-			copy(m.ds[len(m.ds)-(int)(sz):], m.ch.Var[ix:(ix+sz)])
-
-			break
-		case PGET:
-			break
-		case PPUT:
 			break
 		case I2F:
 			break
@@ -123,22 +100,11 @@ func (m *Machine) Exec(args []byte) {
 	}
 }
 
-func (m *Machine) sGetInt() int64
-func (m *Machine) sGetFlt() float64
-func (m *Machine) sGetBol() bool
-func (m *Machine) sGetPtr() uintptr
+func (m *Machine) sgu08() *uint8
+func (m *Machine) sgi64() *int64
+func (m *Machine) sgf64() *float64
 
-func (m *Machine) sPutInt(i int64)
-func (m *Machine) sPutFlt(f float64)
-func (m *Machine) sPutBol(b bool)
-func (m *Machine) sPutPtr(p uintptr)
+func (m *Machine) spptr(ptr *byte)
 
-func (m *Machine) u8() int {
-	return (int)(m.cc[m.ip])
-}
-
-func (m *Machine) u32() int {
-	ptr := unsafe.Pointer(&m.cc[m.ip])
-	m.ip += 4
-	return (int)(*(*uint)(ptr))
-}
+func (m *Machine) cu08() int8
+func (m *Machine) cu32() int32

@@ -1,37 +1,30 @@
 package run
 
-type Command byte
+type Cmd byte
 
 const (
-	JMP Command = iota
+	JMP Cmd = iota
 	JIF
 
-	VADDR // vaddr <idx:4>
-	SADDR // saddr <idx:4>
+	CALL // call <idx:8>
 
-	GET // get <idx:4> <len:1>
-	PUT // put <idx:4> <len:1>
+	ADDR // addr <idx:8>
 
-	PGET // pget <idx:4> <len:1>
-	PPUT // pput <idx:4> <len:1>
+	LDV // ldv <idx:8> <sz:1>
+	MVV // mvv <idx:8> <sz:1>
+	LDR // ldr <idx:8> <off:8> <sz:1>
+	MVR // mvr <idx:8> <off:8> <sz:1>
 
-	SGET // sget <idx:4>
-	SPUT // sput <idx:4>
+	// type conversion
 
-	SPGET // spget
-	SPPUT // spput
-
+	I2U
 	I2F
+	U2I
+	U2F
 	F2I
-	I2S
-	F2S
+	F2U
 
-	// string operations
-
-	SADD
-	SMUL
-
-	// integer operations
+	// signed operations
 
 	IADD
 	ISUB
@@ -52,6 +45,27 @@ const (
 	ILE
 	INE
 
+	// unsigned operations
+
+	UADD
+	USUB
+	UMUL
+	UDIV
+	UPOW
+	USHL
+	USHR
+	UMOD
+	UBAND
+	UBOR
+	UBXOR
+
+	UBNEG
+	UUNEG
+
+	ULT
+	ULE
+	UNE
+
 	// floating-point operations
 
 	FADD
@@ -59,14 +73,7 @@ const (
 	FMUL
 	FDIV
 	FPOW
-	FSHL
-	FSHR
-	FMOD
-	FBAND
-	FBOR
-	FBXOR
 
-	FBNEG
 	FUNEG
 
 	FLT
