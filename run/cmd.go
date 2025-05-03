@@ -7,13 +7,14 @@ const (
 	JIF
 
 	CALL // call <idx:8>
-
 	ADDR // addr <idx:8>
 
-	LDV // ldv <idx:8> <sz:1>
-	MVV // mvv <idx:8> <sz:1>
-	LDR // ldr <idx:8> <off:8> <sz:1>
-	MVR // mvr <idx:8> <off:8> <sz:1>
+	LV // lv <idx:8> <sz:1>
+	SV // sv <idx:8> <sz:1>
+	LR // lr <idx:8> <off:8> <sz:1>
+	SR // sr <idx:8> <off:8> <sz:1>
+
+	RET
 
 	// type conversion
 

@@ -8,11 +8,13 @@ import (
 )
 
 type Scanner struct {
-	buf []rune
-	prv tok.Token
+	Err []error
 
+	buf []rune
 	row int
 	col int
+
+	prv *tok.Token
 }
 
 func (s *Scanner) Load(buf []rune) {
@@ -21,30 +23,25 @@ func (s *Scanner) Load(buf []rune) {
 	s.col = 1
 }
 
-func (s *Scanner) Next() (t tok.Token) {
+func (s *Scanner) Next() *tok.Token {
 	s.skip()
 
-	t.Row = s.row
-	t.Col = s.col
+	t := &tok.Token{
+		Row: s.row,
+		Col: s.col,
+	}
 
 	if len(s.buf) == 0 {
 		t.TokenType = tok.EOF
-		return
+		return t
 	}
 
 	if unicode.IsDigit(s.buf[0]) {
-		s.nextNum(&t)
-		return
+		return s.nextNum(t)
 	}
 
 	if unicode.IsLetter(s.buf[0]) {
-		s.nextIdf(&t)
-		return
-	}
-
-	if s.buf[0] == '"' {
-		s.nextStr(&t)
-		return
+		return s.nextIdf(t)
 	}
 
 	t.Lit = string(s.buf[0:1])
@@ -82,7 +79,7 @@ func (s *Scanner) Next() (t tok.Token) {
 		break
 	case '-':
 		switch s.prv.TokenType {
-		case tok.ID, tok.INT, tok.FLT:
+		case tok.IDF, tok.LI64:
 			t.TokenType = tok.SUB
 			break
 		default:
@@ -181,7 +178,7 @@ func (s *Scanner) Next() (t tok.Token) {
 		t.TokenType = tok.BXOR
 		break
 	case '~':
-		t.TokenType = tok.BINV
+		t.TokenType = tok.BNEG
 		break
 	case '=':
 		t.TokenType = tok.EQ
@@ -212,81 +209,80 @@ func (s *Scanner) Next() (t tok.Token) {
 
 		break
 	default:
-		t.TokenType = tok.ERR
-		t.Err = fmt.Errorf("unknown symbol")
-
-		return
+		s.error(fmt.Errorf("unexpected symbol"))
+		return s.Next()
 	}
 
 	s.prv = t
 	s.buf = s.buf[len(t.Lit):]
+	s.col += len(t.Lit)
 
-	return
+	return t
+}
+
+func (s *Scanner) error(err error) {
+	s.Err = append(s.Err, fmt.Errorf("scanner: %d:%d: %w", s.row, s.col, err))
 }
 
 func (s *Scanner) skip() {
-	for unicode.IsSpace(s.buf[0]) {
+	for len(s.buf) != 0 && unicode.IsSpace(s.buf[0]) {
+		s.col += 1
+
+		if s.buf[0] == '\n' {
+			s.row += 1
+			s.col = 1
+		}
+
 		s.buf = s.buf[1:]
 	}
 }
 
-func (s *Scanner) nextNum(t *tok.Token) {
+func (s *Scanner) nextNum(t *tok.Token) *tok.Token {
 	cur := 1
 
-	t.TokenType = tok.INT
+	t.TokenType = tok.LI64
 
 	for unicode.IsDigit(s.buf[cur]) {
 		cur += 1
 	}
 
-	if s.buf[cur] == '.' {
-		cur += 1
+	if unicode.IsLetter(s.buf[cur]) {
+		s.error(fmt.Errorf("malformed numeric literal"))
 
-		for unicode.IsDigit(s.buf[cur]) {
+		for unicode.IsLetter(s.buf[cur]) {
 			cur += 1
 		}
 
-		t.TokenType = tok.FLT
+		s.col += cur
+		s.buf = s.buf[cur:]
+
+		return s.Next()
 	}
 
 	t.Lit = string(s.buf[:cur])
-	s.prv = *t
+	s.prv = t
+	s.col += cur
 	s.buf = s.buf[cur:]
 
-	return
+	return t
 }
 
-func (s *Scanner) nextStr(t *tok.Token) {
-	cur := 1
-
-	for s.buf[cur] != '"' {
-		cur += 1
-	}
-
-	t.TokenType = tok.STR
-	t.Lit = string(s.buf[1:cur])
-	s.prv = *t
-	s.buf = s.buf[cur+1:]
-
-	return
-}
-
-func (s *Scanner) nextIdf(t *tok.Token) {
+func (s *Scanner) nextIdf(t *tok.Token) *tok.Token {
 	cur := 1
 
 	for unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
 		cur += 1
 	}
 
-	t.TokenType = tok.ID
+	t.TokenType = tok.IDF
 	t.Lit = string(s.buf[:cur])
+	s.prv = t
+	s.col += cur
+	s.buf = s.buf[cur:]
 
 	if tt, ok := tok.AsKeyword(t.Lit); ok {
 		t.TokenType = tt
 	}
 
-	s.prv = *t
-	s.buf = s.buf[cur:]
-
-	return
+	return t
 }
