@@ -1,9 +1,12 @@
 package ast
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 
+	"github.com/paraskun/ess-go/run"
 	"github.com/paraskun/ess-go/tok"
 )
 
@@ -14,47 +17,75 @@ type AsgnStmt struct {
 	Val Expr
 }
 
-func (s *AsgnStmt) Debug(w io.Writer) {
-	s.Idf.Debug(w)
-	s.Val.Debug(w)
-	fmt.Fprintf(w, "%v\n", s.TokenType)
+func (s *AsgnStmt) Write(w io.Writer, o uint) (r uint) {
+	r += s.Val.Write(w, o)
+
+	switch sym := s.Idf.(*IdfExpr).Spec.(type) {
+	case *Bool:
+		binary.Write(w, binary.BigEndian, byte(run.SBI))
+		binary.Write(w, binary.BigEndian, uint32(0))
+		binary.Write(w, binary.BigEndian, sym.Local.Off)
+	case *Sig64:
+		binary.Write(w, binary.BigEndian, byte(run.SDI))
+		binary.Write(w, binary.BigEndian, uint32(0))
+		binary.Write(w, binary.BigEndian, sym.Local.Off)
+	}
+
+	return r + 5
 }
 
 type LoopStmt struct {
 	*tok.Token
 
-	Mb   *Block
+	Rep  *Block
 	Cond Expr
 }
 
-func (s *LoopStmt) Debug(w io.Writer) {
-	fmt.Fprintf(w, "for\n")
-	s.Cond.Debug(w)
-	fmt.Fprintf(w, "do\n")
-	s.Mb.Debug(w)
-	fmt.Fprintf(w, "end\n")
+func (s *LoopStmt) Write(w io.Writer, o uint) (r uint) {
+	bb := bytes.Buffer{}
+
+	r += s.Cond.Write(w, o) + 5
+	r += s.Rep.Write(&bb, o+r) + 5
+
+	binary.Write(w, binary.LittleEndian, byte(run.JIF))
+	binary.Write(w, binary.LittleEndian, uint32(r))
+
+	w.Write(bb.Bytes())
+
+	binary.Write(w, binary.LittleEndian, byte(run.JMP))
+	binary.Write(w, binary.LittleEndian, uint32(o))
+
+	return r
 }
 
 type CondStmt struct {
 	*tok.Token
 
-	Tb   *Block
-	Fb   *Block
+	Pos  *Block
+	Neg  *Block
 	Cond Expr
 }
 
-func (s *CondStmt) Debug(w io.Writer) {
-	fmt.Fprintf(w, "if\n")
-	s.Cond.Debug(w)
-	fmt.Fprintf(w, "do\n")
-	s.Tb.Debug(w)
+func (s *CondStmt) Write(w io.Writer, o uint) (r uint) {
+	tb := bytes.Buffer{}
+	fb := bytes.Buffer{}
 
-	if s.Fb != nil {
-		fmt.Fprintf(w, "else do\n")
-		s.Fb.Debug(w)
+	r += s.Cond.Write(w, o) + 5
+	r += s.Pos.Write(&tb, o+r) + 5
+
+	binary.Write(w, binary.LittleEndian, byte(run.JIF))
+	binary.Write(w, binary.LittleEndian, uint32(r))
+
+	if s.Neg != nil {
+		r += s.Neg.Write(&fb, o+r)
 	}
 
-	fmt.Fprintf(w, "end\n")
+	w.Write(tb.Bytes())
+	binary.Write(w, binary.LittleEndian, byte(run.JMP))
+	binary.Write(w, binary.LittleEndian, uint32(r))
+	w.Write(fb.Bytes())
+
+	return r
 }
 
 func (*AsgnStmt) stmt() {}
@@ -77,11 +108,24 @@ func (p *Parser) parseStmt() Stmt {
 }
 
 func (p *Parser) parseAsgn() *AsgnStmt {
-	r := AsgnStmt{}
+	r := AsgnStmt{Idf: p.parseExpr()}
+	v, ok := r.Idf.(*IdfExpr)
 
-	r.Idf = p.parseExpr()
+	if !ok {
+		p.error(fmt.Errorf("could not assign to literal"))
+	}
+
+	if ts := p.env.Lookup(v.Lit); ts != nil {
+		v.Spec = ts
+	}
+
 	r.Token = p.expect(tok.EQ)
 	r.Val = p.parseExpr()
+
+	if v.Spec == nil {
+		p.env.Sym = append(p.env.Sym, r.Val.Type())
+		p.env.Map[v.Lit] = len(p.env.Sym) - 1
+	}
 
 	p.expect(tok.SEM)
 
@@ -100,7 +144,7 @@ func (p *Parser) parseLoop() *LoopStmt {
 	p.expect(tok.RP)
 	p.expect(tok.LB)
 
-	r.Mb = p.parseBlock()
+	r.Rep = p.parseBlock()
 
 	p.expect(tok.RB)
 
@@ -119,7 +163,7 @@ func (p *Parser) parseCond() *CondStmt {
 	p.expect(tok.RP)
 	p.expect(tok.LB)
 
-	r.Tb = p.parseBlock()
+	r.Pos = p.parseBlock()
 
 	p.expect(tok.RB)
 
@@ -127,7 +171,7 @@ func (p *Parser) parseCond() *CondStmt {
 		p.next()
 		p.expect(tok.LB)
 
-		r.Fb = p.parseBlock()
+		r.Neg = p.parseBlock()
 
 		p.expect(tok.RB)
 	}

@@ -1,29 +1,36 @@
 package run
 
-type Cmd byte
+type Code byte
 
 const (
-	JMP Cmd = iota
+	JMP Code = iota
 	JIF
 
-	CALL // call <idx:8>
-	ADDR // addr <idx:8>
-
-	LV // lv <idx:8> <sz:1>
-	SV // sv <idx:8> <sz:1>
-	LR // lr <idx:8> <off:8> <sz:1>
-	SR // sr <idx:8> <off:8> <sz:1>
+	CALL // call <idx:4>
+	ADDR // addr <idx:4>
 
 	RET
 
+	LBI // lbi <idx:4> <off:4>
+	LDI // ldi <idx:4> <off:4>
+
+	SBI // sbi <idx:4> <off:4>
+	SDI // sdi <idx:4> <off:4>
+
+	LBS // lb <idx:4>
+	LDS // ld <idx:4>
+
+	SBS // sb <idx:4>
+	SDS // sd <idx:4>
+
 	// type conversion
 
-	I2U
-	I2F
-	U2I
-	U2F
-	F2I
-	F2U
+	I2U // i2u
+	I2F // i2f
+	U2I // u2i
+	U2F // u2f
+	F2I // f2i
+	F2U // f2u
 
 	// signed operations
 
@@ -35,49 +42,22 @@ const (
 	ISHL
 	ISHR
 	IMOD
-	IBAND
-	IBOR
-	IBXOR
+
+	IXOR
+	IAND
+	IOR
 
 	IBNEG
 	IUNEG
 
 	ILT
 	ILE
+	IEQ
 	INE
 
-	// unsigned operations
+	// logical operations
 
-	UADD
-	USUB
-	UMUL
-	UDIV
-	UPOW
-	USHL
-	USHR
-	UMOD
-	UBAND
-	UBOR
-	UBXOR
-
-	UBNEG
-	UUNEG
-
-	ULT
-	ULE
-	UNE
-
-	// floating-point operations
-
-	FADD
-	FSUB
-	FMUL
-	FDIV
-	FPOW
-
-	FUNEG
-
-	FLT
-	FLE
-	FNE
+	LAND
+	LOR
+	LNEG
 )

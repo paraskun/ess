@@ -9,7 +9,7 @@ import (
 )
 
 type Node interface {
-	Debug(io.Writer)
+	Write(io.Writer, uint) uint
 }
 
 type Stmt interface {
@@ -21,6 +21,8 @@ type Stmt interface {
 type Expr interface {
 	Node
 
+	Type() TypeSpec
+
 	expr()
 }
 
@@ -30,19 +32,18 @@ type Block struct {
 	Body []Stmt
 }
 
-func (b *Block) Debug(w io.Writer) {
+func (b *Block) Write(w io.Writer, o uint) (r uint) {
 	for _, s := range b.Body {
-		s.Debug(w)
+		r += s.Write(w, o+r)
 	}
-}
 
-type Func struct {
+	return r
 }
 
 type Parser struct {
 	S lex.Scanner
 
-	env []*Env
+	env *Env
 	buf bool
 	prv *tok.Token
 	cur *tok.Token
@@ -61,17 +62,14 @@ func (p *Parser) Parse() *Block {
 func (p *Parser) parseBlock() *Block {
 	r := Block{}
 
-	r.Env = &Env{
-		Env: p.env[len(p.env)-1],
-	}
-
-	p.env = append(p.env, r.Env)
+	r.Env = &Env{Env: p.env}
+	p.env = r.Env
 
 	for p.peek().TokenType != tok.RB {
 		r.Body = append(r.Body, p.parseStmt())
 	}
 
-	p.env = p.env[:len(p.env)-1]
+	p.env = r.Env.Env
 
 	return &r
 }

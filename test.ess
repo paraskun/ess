@@ -1,8 +1,6 @@
 func mean(v i64) {
-  static {
-    s = 0;
-    c = 0;
-  }
+  s = prev(0);
+  c = prev(0);
 
   s = s + v;
   c = c + 1;

@@ -19,5 +19,4 @@ func main() {
 	}
 
 	p.S.Load([]rune(string(dat)))
-	p.Parse().Debug(os.Stdout)
 }

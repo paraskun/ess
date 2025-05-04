@@ -1,110 +1,191 @@
 package run
 
 import (
+	"math"
 	"unsafe"
 )
 
-type FuncImage struct {
-	Name  string
-	ArgSz int
-	Call  []string
-}
-
-type callInfo struct {
-	frame
-}
-
-type Frame struct {
-	Var  []byte
-	Str  []string
-	Call []CallInfo
-}
-
 type Machine struct {
-	Func []FuncImage
+	src []byte
+	mem []byte
+	sck []byte
 
-	fs []*Frame
-	ip []int64
-	os []byte
-
-	fp unsafe.Pointer
-	op unsafe.Pointer
+	ip unsafe.Pointer
+	bp unsafe.Pointer
+	sp unsafe.Pointer
 }
 
-func (m *Machine) Load(name string) {
-	// allocate frame
-	// fill addresses
+func (m *Machine) Load(src []byte) {
+	m.src = src
+	m.mem = make([]byte, 0)
+	m.sck = make([]byte, 0)
+
+	m.ip = unsafe.Pointer(&m.src[0])
+	m.bp = unsafe.Pointer(&m.mem[0])
+	m.sp = unsafe.Pointer(&m.sck[0])
 }
 
-func (m *Machine) Exec(args []byte) {
+func (m *Machine) Exec() {
 	for {
-		cmd := m.cc[m.ip]
+		cmd := Code(m.nu08())
 
 		switch cmd {
 		case JMP:
-			m.ip = m.cu32()
-			break
+			m.ip = unsafe.Pointer(&m.src[m.nu32()])
 		case JIF:
-			if *m.sgu08() != 0 {
-				m.ip = m.cu32()
+			if m.lu08() == 0 {
+				m.ip = unsafe.Pointer(&m.src[m.nu32()])
 			}
+		case LBI:
+			ptr := unsafe.Add(m.bp, m.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
 
-			break
+			m.su08(*(*uint8)(off))
+		case LDI:
+			ptr := unsafe.Add(m.bp, m.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+
+			m.su64(*(*uint64)(off))
+		case SBI:
+			ptr := unsafe.Add(m.bp, m.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+
+			*(*uint8)(off) = m.lu08()
+		case SDI:
+			ptr := unsafe.Add(m.bp, m.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+
+			*(*uint64)(off) = m.lu64()
 		case ADDR:
-			m.spptr(&m.Data.Stack[m.cu32()])
-			break
-		case GET:
-			ix := m.cu32()
-			sz := m.cu08()
-
-			break
-		case PUT:
-			break
-		case I2F:
-			break
-		case F2I:
-			break
 		case IADD:
-			break
+			m.si64(m.li64() + m.li64())
 		case ISUB:
-			break
+			m.si64(m.li64() - m.li64())
 		case IMUL:
-			break
+			m.si64(m.li64() * m.li64())
 		case IDIV:
-			break
+			m.si64(m.li64() / m.li64())
 		case IPOW:
-			break
+			m.si64(int64(math.Pow(float64(m.li64()), float64(m.li64()))))
 		case ISHL:
-			break
+			m.si64(m.li64() << m.li64())
 		case ISHR:
-			break
+			m.si64(m.li64() >> m.li64())
 		case IMOD:
-			break
-		case IBAND:
-			break
-		case IBOR:
-			break
-		case IBXOR:
-			break
+			m.si64(m.li64() % m.li64())
+		case IXOR:
+			m.si64(m.li64() ^ m.li64())
+		case IAND:
+			m.si64(m.li64() & m.li64())
+		case IOR:
+			m.si64(m.li64() | m.li64())
 		case IBNEG:
-			break
+			m.si64(^m.li64())
 		case IUNEG:
-			break
+			m.si64(-m.li64())
 		case ILT:
-			break
+			if m.li64() < m.li64() {
+				m.su08(1)
+			} else {
+				m.su08(0)
+			}
 		case ILE:
-			break
+			if m.li64() <= m.li64() {
+				m.su08(1)
+			} else {
+				m.su08(0)
+			}
+		case IEQ:
+			if m.li64() == m.li64() {
+				m.su08(1)
+			} else {
+				m.su08(0)
+			}
 		case INE:
-			break
+			if m.li64() != m.li64() {
+				m.su08(1)
+			} else {
+				m.su08(0)
+			}
+		case LAND:
+			if m.lu08() == 0 || m.lu08() == 0 {
+				m.su08(0)
+			} else {
+				m.su08(1)
+			}
+		case LOR:
+			if m.lu08() == 0 && m.lu08() == 0 {
+				m.su08(0)
+			} else {
+				m.su08(1)
+			}
+		case LNEG:
+			if m.lu08() == 0 {
+				m.su08(1)
+			} else {
+				m.su08(0)
+			}
 		}
 	}
 }
 
-func (m *Machine) sgu08() *uint8
-func (m *Machine) sgi64() *int64
-func (m *Machine) sgf64() *float64
+func (m *Machine) nu08() uint8 {
+	r := *(*uint8)(m.ip)
+	m.ip = unsafe.Add(m.ip, 1)
 
-func (m *Machine) spptr(ptr *byte)
+	return r
+}
 
-func (m *Machine) cu08() int8
-func (m *Machine) cu32() int32
+func (m *Machine) nu32() uint32 {
+	r := *(*uint32)(m.ip)
+	m.ip = unsafe.Add(m.ip, 4)
+
+	return r
+}
+
+func (m *Machine) nu64() uint64 {
+	r := *(*uint64)(m.ip)
+	m.ip = unsafe.Add(m.ip, 8)
+
+	return r
+}
+
+func (m *Machine) lu08() uint8 {
+	m.sp = unsafe.Add(m.sp, -1)
+	return *(*uint8)(m.sp)
+}
+
+func (m *Machine) lu64() uint64 {
+	m.sp = unsafe.Add(m.sp, -8)
+	return *(*uint64)(m.sp)
+}
+
+func (m *Machine) li08() int8 {
+	m.sp = unsafe.Add(m.sp, -1)
+	return *(*int8)(m.sp)
+}
+
+func (m *Machine) li64() int64 {
+	m.sp = unsafe.Add(m.sp, -8)
+	return *(*int64)(m.sp)
+}
+
+func (m *Machine) su08(v uint8) {
+	*(*uint8)(m.sp) = v
+	m.sp = unsafe.Add(m.sp, 1)
+}
+
+func (m *Machine) su64(v uint64) {
+	*(*uint64)(m.sp) = v
+	m.sp = unsafe.Add(m.sp, 8)
+}
+
+func (m *Machine) si08(v int8) {
+	*(*int8)(m.sp) = v
+	m.sp = unsafe.Add(m.sp, 1)
+}
+
+func (m *Machine) si64(v int64) {
+	*(*int64)(m.sp) = v
+	m.sp = unsafe.Add(m.sp, 8)
+}
