@@ -3,8 +3,6 @@ package lex
 import (
 	"fmt"
 	"unicode"
-
-	"github.com/paraskun/ess-go/tok"
 )
 
 type Scanner struct {
@@ -14,7 +12,7 @@ type Scanner struct {
 	row int
 	col int
 
-	prv *tok.Token
+	prv *Token
 }
 
 func (s *Scanner) Load(buf []rune) {
@@ -23,16 +21,16 @@ func (s *Scanner) Load(buf []rune) {
 	s.col = 1
 }
 
-func (s *Scanner) Next() *tok.Token {
+func (s *Scanner) Next() *Token {
 	s.skip()
 
-	t := &tok.Token{
+	t := &Token{
 		Row: s.row,
 		Col: s.col,
 	}
 
 	if len(s.buf) == 0 {
-		t.TokenType = tok.EOF
+		t.TokenType = EOF
 		return t
 	}
 
@@ -48,166 +46,126 @@ func (s *Scanner) Next() *tok.Token {
 
 	switch s.buf[0] {
 	case '(':
-		t.TokenType = tok.LP
-		break
+		t.TokenType = LP
 	case ')':
-		t.TokenType = tok.RP
-		break
+		t.TokenType = RP
 	case '{':
-		t.TokenType = tok.LB
-		break
+		t.TokenType = LB
 	case '}':
-		t.TokenType = tok.RB
-		break
+		t.TokenType = RB
 	case '[':
-		t.TokenType = tok.LSB
-		break
+		t.TokenType = LSB
 	case ']':
-		t.TokenType = tok.RSB
-		break
+		t.TokenType = RSB
 	case ':':
-		t.TokenType = tok.COL
-		break
+		t.TokenType = COL
 	case ';':
-		t.TokenType = tok.SEM
-		break
+		t.TokenType = SEM
 	case ',':
-		t.TokenType = tok.COM
-		break
+		t.TokenType = COM
+	case '.':
+		t.TokenType = DOT
 	case '+':
-		t.TokenType = tok.ADD
-		break
+		t.TokenType = ADD
 	case '-':
 		switch s.prv.TokenType {
-		case tok.IDF, tok.LI64:
-			t.TokenType = tok.SUB
-			break
+		case IDF, II64:
+			t.TokenType = SUB
 		default:
-			t.TokenType = tok.UNEG
-			break
+			t.TokenType = UNEG
 		}
 
 		break
 	case '*':
-		t.TokenType = tok.MUL
+		t.TokenType = MUL
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '*':
-				t.TokenType = tok.POW
+				t.TokenType = POW
 				t.Lit = string(s.buf[0:2])
-
-				break
 			}
 		}
 
 		break
 	case '/':
-		t.TokenType = tok.DIV
-		break
+		t.TokenType = DIV
 	case '<':
-		t.TokenType = tok.LT
+		t.TokenType = LT
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '<':
-				t.TokenType = tok.SHL
+				t.TokenType = SHL
 				t.Lit = string(s.buf[0:2])
-
-				break
 			case '=':
-				t.TokenType = tok.LE
+				t.TokenType = LE
 				t.Lit = string(s.buf[0:2])
-
-				break
 			}
 		}
 
 		break
 	case '>':
-		t.TokenType = tok.GT
+		t.TokenType = GT
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '>':
-				t.TokenType = tok.SHR
+				t.TokenType = SHR
 				t.Lit = string(s.buf[0:2])
-
-				break
 			case '=':
-				t.TokenType = tok.GE
+				t.TokenType = GE
 				t.Lit = string(s.buf[0:2])
-
-				break
 			}
 		}
 
 		break
 	case '%':
-		t.TokenType = tok.MOD
-		break
+		t.TokenType = MOD
 	case '&':
-		t.TokenType = tok.BAND
+		t.TokenType = BAND
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '&':
-				t.TokenType = tok.LAND
+				t.TokenType = LAND
 				t.Lit = string(s.buf[0:2])
-
-				break
 			}
 		}
-
-		break
 	case '|':
-		t.TokenType = tok.BOR
+		t.TokenType = BOR
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '|':
-				t.TokenType = tok.LOR
+				t.TokenType = LOR
 				t.Lit = string(s.buf[0:2])
-
-				break
 			}
 		}
-
-		break
 	case '^':
-		t.TokenType = tok.BXOR
-		break
+		t.TokenType = BXOR
 	case '~':
-		t.TokenType = tok.BNEG
-		break
+		t.TokenType = BNEG
 	case '=':
-		t.TokenType = tok.EQ
+		t.TokenType = EQ
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '=':
-				t.TokenType = tok.EEQ
+				t.TokenType = EEQ
 				t.Lit = string(s.buf[0:2])
-
-				break
 			}
 		}
-
-		break
 	case '!':
-		t.TokenType = tok.LNEG
+		t.TokenType = LNEG
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '=':
-				t.TokenType = tok.NE
+				t.TokenType = NE
 				t.Lit = string(s.buf[0:2])
-
-				break
 			}
 		}
-
-		break
 	default:
 		s.error(fmt.Errorf("unexpected symbol"))
 		return s.Next()
@@ -237,10 +195,10 @@ func (s *Scanner) skip() {
 	}
 }
 
-func (s *Scanner) nextNum(t *tok.Token) *tok.Token {
+func (s *Scanner) nextNum(t *Token) *Token {
 	cur := 1
 
-	t.TokenType = tok.LI64
+	t.TokenType = II64
 
 	for unicode.IsDigit(s.buf[cur]) {
 		cur += 1
@@ -267,20 +225,20 @@ func (s *Scanner) nextNum(t *tok.Token) *tok.Token {
 	return t
 }
 
-func (s *Scanner) nextIdf(t *tok.Token) *tok.Token {
+func (s *Scanner) nextIdf(t *Token) *Token {
 	cur := 1
 
 	for unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
 		cur += 1
 	}
 
-	t.TokenType = tok.IDF
+	t.TokenType = IDF
 	t.Lit = string(s.buf[:cur])
 	s.prv = t
 	s.col += cur
 	s.buf = s.buf[cur:]
 
-	if tt, ok := tok.AsKeyword(t.Lit); ok {
+	if tt, ok := AsKeyword(t.Lit); ok {
 		t.TokenType = tt
 	}
 

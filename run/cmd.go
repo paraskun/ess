@@ -6,10 +6,14 @@ const (
 	JMP Code = iota
 	JIF
 
-	CALL // call <idx:4>
-	ADDR // addr <idx:4>
+	// Function execution
 
+	CALL // call <idx:4>
 	RET
+
+	// Memory
+
+	ADDR // addr <idx:4>
 
 	LBI // lbi <idx:4> <off:4>
 	LDI // ldi <idx:4> <off:4>
@@ -23,7 +27,7 @@ const (
 	SBS // sb <idx:4>
 	SDS // sd <idx:4>
 
-	// type conversion
+	// Type conversion
 
 	I2U // i2u
 	I2F // i2f
@@ -32,7 +36,7 @@ const (
 	F2I // f2i
 	F2U // f2u
 
-	// signed operations
+	// Signed operations
 
 	IADD
 	ISUB
@@ -55,7 +59,7 @@ const (
 	IEQ
 	INE
 
-	// logical operations
+	// Logical operations
 
 	LAND
 	LOR

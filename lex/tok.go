@@ -1,8 +1,6 @@
-//go:generate stringer -type=TokenType
+package lex
 
-package tok
-
-type TokenType int
+type TokenType uint8
 
 const (
 	EOF TokenType = iota
@@ -10,7 +8,9 @@ const (
 	// Literals
 
 	IDF  // identifier
-	LI64 // 102
+	II64 // 102
+	IU64 // 102u
+	IF64 // 102.0
 
 	// Punctuation
 
@@ -23,6 +23,7 @@ const (
 	COL // :
 	SEM // ;
 	COM // ,
+	DOT // .
 
 	// Binary operators
 
@@ -61,8 +62,13 @@ const (
 
 	// Keywords
 
+	VAR
 	I64
+	U64
+	F64
 	BOOL
+	TYPE
+	FUNC
 	FOR
 	IF
 	ELSE
@@ -70,6 +76,7 @@ const (
 	BREAK
 	TRUE
 	FALSE
+	PREV
 )
 
 type Token struct {
@@ -81,8 +88,13 @@ type Token struct {
 }
 
 var kwd = map[string]TokenType{
+	"var":    VAR,
 	"i64":    I64,
+	"u64":    U64,
+	"f64":    F64,
 	"bool":   BOOL,
+	"type":   TYPE,
+	"func":   FUNC,
 	"for":    FOR,
 	"if":     IF,
 	"else":   ELSE,
@@ -90,6 +102,7 @@ var kwd = map[string]TokenType{
 	"break":  BREAK,
 	"true":   TRUE,
 	"false":  FALSE,
+	"prev":   PREV,
 }
 
 func AsKeyword(lit string) (TokenType, bool) {
