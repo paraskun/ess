@@ -71,6 +71,14 @@ func (*CondStmt) stmt()   {}
 
 // Expressions
 
+type CastKind uint8
+
+const (
+	C2I CastKind = iota
+	C2U
+	C2F
+)
+
 type (
 	Expr interface {
 		Node
@@ -84,7 +92,7 @@ type (
 		Typ *typ.Type
 	}
 
-	ImmField struct {
+	CompField struct {
 		Tok *lex.Token
 		Val Expr
 	}
@@ -92,7 +100,7 @@ type (
 	CompImmExpr struct {
 		BaseImmExpr
 
-		Fields []ImmField
+		Fields []CompField
 	}
 
 	IdfExpr struct {
@@ -130,6 +138,27 @@ type (
 		Exe Expr
 		Arg []Expr
 	}
+
+	ToSigExpr struct {
+		Tok *lex.Token
+		Typ *typ.Type
+
+		X Expr
+	}
+
+	ToUnsExpr struct {
+		Tok *lex.Token
+		Typ *typ.Type
+
+		X Expr
+	}
+
+	ToFltExpr struct {
+		Tok *lex.Token
+		Typ *typ.Type
+
+		X Expr
+	}
 )
 
 func (e *BaseImmExpr) Accept(v Visitor) { v.VisitExpr(e) }
@@ -139,6 +168,9 @@ func (e *DotExpr) Accept(v Visitor)     { v.VisitExpr(e) }
 func (e *InfExpr) Accept(v Visitor)     { v.VisitExpr(e) }
 func (e *PfxExpr) Accept(v Visitor)     { v.VisitExpr(e) }
 func (e *CallExpr) Accept(v Visitor)    { v.VisitExpr(e) }
+func (e *ToSigExpr) Accept(v Visitor)   { v.VisitExpr(e) }
+func (e *ToUnsExpr) Accept(v Visitor)   { v.VisitExpr(e) }
+func (e *ToFltExpr) Accept(v Visitor)   { v.VisitExpr(e) }
 
 func (e *BaseImmExpr) Type() []*typ.Type { return []*typ.Type{e.Typ} }
 func (e *CompImmExpr) Type() []*typ.Type { return []*typ.Type{e.Typ} }
@@ -147,6 +179,9 @@ func (e *DotExpr) Type() []*typ.Type     { return []*typ.Type{e.Typ} }
 func (e *InfExpr) Type() []*typ.Type     { return []*typ.Type{e.Typ} }
 func (e *PfxExpr) Type() []*typ.Type     { return []*typ.Type{e.Typ} }
 func (e *CallExpr) Type() []*typ.Type    { return e.Typ }
+func (e *ToSigExpr) Type() []*typ.Type   { return []*typ.Type{e.Typ} }
+func (e *ToUnsExpr) Type() []*typ.Type   { return []*typ.Type{e.Typ} }
+func (e *ToFltExpr) Type() []*typ.Type   { return []*typ.Type{e.Typ} }
 
 func (*BaseImmExpr) expr() {}
 func (*CompImmExpr) expr() {}
@@ -155,6 +190,9 @@ func (*DotExpr) expr()     {}
 func (*InfExpr) expr()     {}
 func (*PfxExpr) expr()     {}
 func (*CallExpr) expr()    {}
+func (*ToSigExpr) expr()   {}
+func (*ToUnsExpr) expr()   {}
+func (*ToFltExpr) expr()   {}
 
 // Type specification
 
@@ -644,20 +682,54 @@ func (p *parser) parseExpr6() Expr {
 
 			continue
 		case lex.LP:
-			exe := &CallExpr{
-				Tok: p.next(),
-				Exe: cur,
-			}
+			switch p.prv.TokenType {
+			case lex.I64:
+				p.next()
 
-			for p.peek().TokenType != lex.RP {
-				exe.Arg = append(exe.Arg, p.parseExpr0())
-
-				if p.peek().TokenType != lex.RP {
-					p.expect(lex.COM)
+				cur = &ToSigExpr{
+					Tok: p.prv,
+					X:   p.parseExpr0(),
 				}
-			}
 
-			cur = exe
+				p.expect(lex.RP)
+			case lex.U64:
+				p.next()
+
+				cur = &ToUnsExpr{
+					Tok: p.prv,
+					X:   p.parseExpr0(),
+				}
+
+				p.expect(lex.RP)
+			case lex.F64:
+				p.next()
+
+				cur = &ToFltExpr{
+					Tok: p.prv,
+					X:   p.parseExpr0(),
+				}
+
+				p.expect(lex.RP)
+			default:
+				p.next()
+
+				exe := &CallExpr{
+					Tok: p.prv,
+					Exe: cur,
+				}
+
+				for p.peek().TokenType != lex.RP {
+					exe.Arg = append(exe.Arg, p.parseExpr0())
+
+					if p.peek().TokenType != lex.RP {
+						p.expect(lex.COM)
+					}
+				}
+
+				p.expect(lex.RP)
+
+				cur = exe
+			}
 
 			continue
 		}
@@ -685,7 +757,7 @@ func (p *parser) parseExpr7() Expr {
 				p.expect(lex.COL)
 				val := p.parseExpr0()
 
-				exp.Fields = append(exp.Fields, ImmField{
+				exp.Fields = append(exp.Fields, CompField{
 					Tok: tok,
 					Val: val,
 				})

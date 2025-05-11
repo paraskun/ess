@@ -204,10 +204,10 @@ func (s *Scanner) nextNum(t *Token) *Token {
 		cur += 1
 	}
 
-	if unicode.IsLetter(s.buf[cur]) {
+	if unicode.IsLetter(s.buf[cur]) && s.buf[cur] != 'u' {
 		s.error(fmt.Errorf("malformed numeric literal"))
 
-		for unicode.IsLetter(s.buf[cur]) {
+		for unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
 			cur += 1
 		}
 
@@ -215,6 +215,48 @@ func (s *Scanner) nextNum(t *Token) *Token {
 		s.buf = s.buf[cur:]
 
 		return s.Next()
+	}
+
+	if s.buf[cur] == 'u' {
+		t.TokenType = IU64
+
+		cur += 1
+
+		if unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
+			s.error(fmt.Errorf("malformed numeric literal"))
+
+			for unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
+				cur += 1
+			}
+
+			s.col += cur
+			s.buf = s.buf[cur:]
+
+			return s.Next()
+		}
+	}
+
+	if s.buf[cur] == '.' {
+		t.TokenType = IF64
+
+		cur += 1
+
+		for unicode.IsDigit(s.buf[cur]) {
+			cur += 1
+		}
+
+		if unicode.IsLetter(s.buf[cur]) {
+			s.error(fmt.Errorf("malformed numeric literal"))
+
+			for unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
+				cur += 1
+			}
+
+			s.col += cur
+			s.buf = s.buf[cur:]
+
+			return s.Next()
+		}
 	}
 
 	t.Lit = string(s.buf[:cur])

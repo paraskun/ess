@@ -33,7 +33,7 @@ type (
 	}
 
 	CompType struct {
-		Fields []Field
+		Fields map[string]Field
 	}
 )
 
