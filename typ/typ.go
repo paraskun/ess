@@ -108,5 +108,42 @@ type Env struct {
 	Obj map[string]*Object
 }
 
-func (*Env) LookupSym(name string) (*Type, uint)
-func (*Env) LookupObj(name string) (*Object, uint)
+func NewEnv(p *Env) *Env {
+	return &Env{
+		Env: p,
+		Sym: make(map[string]*Type),
+		Obj: make(map[string]*Object),
+	}
+}
+
+func (e *Env) LookupSym(name string) (*Type, int) {
+	env := e
+	lvl := 0
+
+	for env != nil {
+		if sym, ok := env.Sym[name]; ok {
+			return sym, lvl
+		}
+
+		lvl += 1
+		env = env.Env
+	}
+
+	return nil, lvl
+}
+
+func (e *Env) LookupObj(name string) (*Object, int) {
+	env := e
+	lvl := 0
+
+	for env != nil {
+		if obj, ok := env.Obj[name]; ok {
+			return obj, lvl
+		}
+
+		lvl += 1
+		env = env.Env
+	}
+
+	return nil, lvl
+}

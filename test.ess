@@ -1,9 +1,0 @@
-func mean(v i64) {
-  s = prev(0);
-  c = prev(0);
-
-  s = s + v;
-  c = c + 1;
-
-  return s / c;
-}

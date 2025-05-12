@@ -23,7 +23,10 @@ func Typeset(p *Pragma) {
 func (t *typer) VisitStmt(s Stmt) {
 	switch v := s.(type) {
 	case *BlockStmt:
-		v.Env = &typ.Env{Env: t.env}
+		if v.Env == nil {
+			v.Env = typ.NewEnv(t.env)
+		}
+
 		t.env = v.Env
 
 		for _, o := range v.Body {
@@ -112,7 +115,127 @@ func (t *typer) visitAssignStmt(a *AssignStmt) {
 func (t *typer) VisitDecl(u Decl) {
 	switch d := u.(type) {
 	case *FuncDecl:
+		if obj, lvl := t.env.LookupObj(d.Tok.Lit); obj != nil && lvl == 0 {
+			panic("name collision")
+		}
+
+		d.Body.Env = typ.NewEnv(t.env)
+		t.env = d.Body.Env
+		t.visitTypeSpec(d.Spec)
+		t.fun = d.Spec.Typ.Info.(*typ.FuncType)
+		d.Body.Accept(t)
+		t.fun = nil
+
+		t.env.Obj[d.Tok.Lit] = &typ.Object{
+			Typ: d.Spec.Typ,
+			Env: t.env,
+		}
 	case *CompDecl:
+		if obj, lvl := t.env.LookupSym(d.Tok.Lit); obj != nil && lvl == 0 {
+			panic("name collision")
+		}
+
+		t.visitTypeSpec(d.Spec)
+		t.env.Sym[d.Tok.Lit] = d.Spec.Typ
+	}
+}
+
+func (t *typer) visitTypeSpec(u TypeSpec) {
+	switch s := u.(type) {
+	case *BaseSpec:
+		switch s.Tok.TokenType {
+		case lex.BOOL:
+			s.Typ = &typ.BoolType
+		case lex.I64:
+			s.Typ = &typ.Sig64Type
+		case lex.U64:
+			s.Typ = &typ.Uns64Type
+		case lex.F64:
+			s.Typ = &typ.Flt64Type
+		case lex.IDF:
+			sym, _ := t.env.LookupSym(s.Tok.Lit)
+
+			if sym == nil {
+				panic("undeclared type")
+			}
+
+			s.Typ = sym
+		}
+	case *FuncSpec:
+		ft := typ.FuncType{}
+
+		for _, fs := range s.Arg {
+			if fs.Tok == nil {
+				panic("unnamed argument")
+			}
+
+			t.visitTypeSpec(fs.Typ)
+
+			if obj, lvl := t.env.LookupObj(fs.Tok.Lit); obj != nil && lvl == 0 {
+				panic("name collision")
+			}
+
+			t.env.Obj[fs.Tok.Lit] = &typ.Object{
+				Typ: fs.Typ.Type(),
+				Env: t.env,
+			}
+
+			ft.Arg = append(ft.Arg, typ.Field{
+				Name: fs.Tok.Lit,
+				Type: fs.Typ.Type(),
+			})
+		}
+
+		for _, fs := range s.Ret {
+			t.visitTypeSpec(fs.Typ)
+
+			if fs.Tok != nil {
+				if obj, lvl := t.env.LookupObj(fs.Tok.Lit); obj != nil && lvl == 0 {
+					panic("name collision")
+				}
+
+				t.env.Obj[fs.Tok.Lit] = &typ.Object{
+					Typ: fs.Typ.Type(),
+					Env: t.env,
+				}
+			}
+
+			ft.Ret = append(ft.Ret, typ.Field{
+				Name: "",
+				Type: fs.Typ.Type(),
+			})
+		}
+
+		s.Typ = &typ.Type{
+			Kind: typ.FUNC,
+			Info: &ft,
+		}
+	case *CompSpec:
+		ct := typ.CompType{
+			Fields: make(map[string]typ.Field),
+		}
+
+		for _, fs := range s.Fields {
+			if fs.Tok == nil {
+				panic("unnamed field")
+			}
+
+			t.visitTypeSpec(fs.Typ)
+
+			if _, ok := ct.Fields[fs.Tok.Lit]; ok {
+				panic("duplicate field")
+			}
+
+			ct.Fields[fs.Tok.Lit] = typ.Field{
+				Name: fs.Tok.Lit,
+				Type: fs.Typ.Type(),
+			}
+		}
+
+		s.Typ = &typ.Type{
+			Kind: typ.COMP,
+			Info: &ct,
+		}
 	}
 }
 
@@ -187,6 +310,10 @@ func (t *typer) VisitExpr(u Expr) {
 		tx := e.X.Type()[0]
 		ty := e.Y.Type()[0]
 
+		if tx.Kind != ty.Kind {
+			panic("type mismatch")
+		}
+
 		if tx.Kind == typ.COMP || tx.Kind == typ.FUNC {
 			panic("unsupported operand")
 		}
@@ -195,14 +322,77 @@ func (t *typer) VisitExpr(u Expr) {
 			panic("unsupported operand")
 		}
 
-		if tx.Kind != ty.Kind {
-			panic("type mismatch")
-		}
-
 		e.Typ = tx
 	case *PfxExpr:
 		e.X.Accept(t)
 		e.Typ = e.X.Type()[0]
 	case *CallExpr:
+		tt, _ := t.env.LookupObj(e.Tok.Lit)
+
+		if tt == nil {
+			panic("undeclared function")
+		}
+
+		re := make([]*typ.Type, 0)
+
+		for _, arg := range e.Arg {
+			arg.Accept(t)
+			re = append(re, arg.Type()...)
+		}
+
+		ft := tt.Typ.Info.(*typ.FuncType)
+
+		if len(ft.Arg) != len(re) {
+			panic("function argument disbalance")
+		}
+
+		for i, at := range re {
+			if !at.Equal(ft.Arg[i].Type) {
+				panic("type mismatch")
+			}
+		}
+
+		for _, ret := range ft.Ret {
+			e.Typ = append(e.Typ, ret.Type)
+		}
+	case *ToSigExpr:
+		e.X.Accept(t)
+
+		if len(e.X.Type()) > 1 {
+			panic("could not cast multivariable expression")
+		}
+
+		switch e.X.Type()[0].Kind {
+		case typ.FUNC, typ.COMP, typ.BOOL:
+			panic("unsupported operand type")
+		}
+
+		e.Typ = &typ.Sig64Type
+	case *ToUnsExpr:
+		e.X.Accept(t)
+
+		if len(e.X.Type()) > 1 {
+			panic("could not cast multivariable expression")
+		}
+
+		switch e.X.Type()[0].Kind {
+		case typ.FUNC, typ.COMP, typ.BOOL:
+			panic("unsupported operand type")
+		}
+
+		e.Typ = &typ.Uns64Type
+	case *ToFltExpr:
+		e.X.Accept(t)
+
+		if len(e.X.Type()) > 1 {
+			panic("could not cast multivariable expression")
+		}
+
+		switch e.X.Type()[0].Kind {
+		case typ.FUNC, typ.COMP, typ.BOOL:
+			panic("unsupported operand type")
+		}
+
+		e.Typ = &typ.Flt64Type
 	}
 }

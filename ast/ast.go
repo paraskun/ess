@@ -71,14 +71,6 @@ func (*CondStmt) stmt()   {}
 
 // Expressions
 
-type CastKind uint8
-
-const (
-	C2I CastKind = iota
-	C2U
-	C2F
-)
-
 type (
 	Expr interface {
 		Node
@@ -309,9 +301,15 @@ func (p *parser) expect(tt lex.TokenType) *lex.Token {
 	return p.cur
 }
 
-func Parse() *Pragma {
-	r := Pragma{}
+func Parse(buf []rune) *Pragma {
 	p := parser{}
+	r := Pragma{
+		BlockStmt: &BlockStmt{
+			Env: typ.NewEnv(nil),
+		},
+	}
+
+	p.lex.Load(buf)
 
 	for p.peek().TokenType != lex.EOF {
 		r.Body = append(r.Body, p.parseStmt())
@@ -460,7 +458,7 @@ func (p *parser) parseCondStmt() *CondStmt {
 
 func (p *parser) parseTypeSpec() TypeSpec {
 	switch p.peek().TokenType {
-	case lex.BOOL, lex.I64, lex.U64, lex.F64:
+	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDF:
 		return &BaseSpec{Tok: p.next()}
 	case lex.LB:
 		return p.parseCompSpec()
@@ -499,6 +497,8 @@ func (p *parser) parseFuncSpec() *FuncSpec {
 	p.expect(lex.RP)
 
 	if p.peek().TokenType == lex.LP {
+		p.next()
+
 		for p.peek().TokenType != lex.RP {
 			s.Ret = append(s.Ret, p.parseFieldSpec())
 
@@ -523,6 +523,8 @@ func (p *parser) parseCompSpec() *CompSpec {
 	for p.peek().TokenType != lex.RB {
 		s.Fields = append(s.Fields, p.parseFieldSpec())
 	}
+
+	p.expect(lex.RB)
 
 	return s
 }
@@ -742,7 +744,7 @@ func (p *parser) parseExpr6() Expr {
 
 func (p *parser) parseExpr7() Expr {
 	switch p.peek().TokenType {
-	case lex.IDF:
+	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDF:
 		par := p.next()
 
 		if p.peek().TokenType == lex.LB {
