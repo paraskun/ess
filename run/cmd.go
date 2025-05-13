@@ -59,6 +59,44 @@ const (
 	IEQ
 	INE
 
+	// Unsigned operations
+
+	UADD
+	USUB
+	UMUL
+	UDIV
+	UPOW
+	USHL
+	USHR
+	UMOD
+
+	UXOR
+	UAND
+	UOR
+
+	UBNEG
+	UUNEG
+
+	ULT
+	ULE
+	UEQ
+	UNE
+
+	// Floating point operations
+
+	FADD
+	FSUB
+	FMUL
+	FDIV
+	FPOW
+
+	FUNEG
+
+	FLT
+	FLE
+	FEQ
+	FNE
+
 	// Logical operations
 
 	LAND

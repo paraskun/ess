@@ -5,6 +5,27 @@ import (
 	"unsafe"
 )
 
+type (
+	Pragma struct {
+		Img []FuncImage
+	}
+
+	FuncImage struct {
+		DataSize int
+		ArgsSize int
+
+		Imm  []byte
+		Call []uint
+		Code []byte
+	}
+
+	FuncFrame struct {
+		Func *FuncImage
+		Data []byte
+		Call []FuncFrame
+	}
+)
+
 type Machine struct {
 	src []byte
 	mem []byte
@@ -13,6 +34,10 @@ type Machine struct {
 	ip unsafe.Pointer
 	bp unsafe.Pointer
 	sp unsafe.Pointer
+
+	sip unsafe.Pointer
+	sbp unsafe.Pointer
+	ssp unsafe.Pointer
 }
 
 func (m *Machine) Load(src []byte) {

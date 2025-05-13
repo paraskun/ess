@@ -81,7 +81,7 @@ type (
 
 	BaseImmExpr struct {
 		Tok *lex.Token
-		Typ *typ.Type
+		Obj *typ.Object
 	}
 
 	CompField struct {
@@ -90,14 +90,15 @@ type (
 	}
 
 	CompImmExpr struct {
-		BaseImmExpr
+		Tok *lex.Token
+		Typ *typ.Type
 
 		Fields []CompField
 	}
 
 	IdfExpr struct {
 		Tok *lex.Token
-		Typ *typ.Type
+		Obj *typ.Object
 	}
 
 	DotExpr struct {
@@ -164,9 +165,9 @@ func (e *ToSigExpr) Accept(v Visitor)   { v.VisitExpr(e) }
 func (e *ToUnsExpr) Accept(v Visitor)   { v.VisitExpr(e) }
 func (e *ToFltExpr) Accept(v Visitor)   { v.VisitExpr(e) }
 
-func (e *BaseImmExpr) Type() []*typ.Type { return []*typ.Type{e.Typ} }
+func (e *BaseImmExpr) Type() []*typ.Type { return []*typ.Type{e.Obj.Typ} }
 func (e *CompImmExpr) Type() []*typ.Type { return []*typ.Type{e.Typ} }
-func (e *IdfExpr) Type() []*typ.Type     { return []*typ.Type{e.Typ} }
+func (e *IdfExpr) Type() []*typ.Type     { return []*typ.Type{e.Obj.Typ} }
 func (e *DotExpr) Type() []*typ.Type     { return []*typ.Type{e.Typ} }
 func (e *InfExpr) Type() []*typ.Type     { return []*typ.Type{e.Typ} }
 func (e *PfxExpr) Type() []*typ.Type     { return []*typ.Type{e.Typ} }
@@ -749,9 +750,7 @@ func (p *parser) parseExpr7() Expr {
 
 		if p.peek().TokenType == lex.LB {
 			exp := &CompImmExpr{
-				BaseImmExpr: BaseImmExpr{
-					Tok: par,
-				},
+				Tok: par,
 			}
 
 			for p.peek().TokenType != lex.RB {

@@ -37,6 +37,21 @@ type (
 	}
 )
 
+func (t *Type) Size() (r int) {
+	switch t.Kind {
+	case BOOL:
+		return 1
+	case I64, U64, F64, FUNC:
+		return 8
+	case COMP:
+		for _, f := range t.Info.(*CompType).Fields {
+			r += f.Type.Size()
+		}
+	}
+
+	return r
+}
+
 func (t *Type) Equal(o *Type) bool {
 	if t.Kind != o.Kind {
 		return false
@@ -74,7 +89,6 @@ func (t *FuncType) Equal(o *FuncType) bool {
 	}
 
 	return true
-
 }
 
 var (
@@ -98,13 +112,24 @@ var (
 type Object struct {
 	Typ *Type
 	Env *Env
+	Ref bool
 	Val any
+	Off int
+}
+
+func (o *Object) Size() int {
+	if o.Ref {
+		return 8
+	}
+
+	return o.Typ.Size()
 }
 
 type Env struct {
 	*Env
 
 	Sym map[string]*Type
+	Imm map[string]*Object
 	Obj map[string]*Object
 }
 
@@ -112,6 +137,7 @@ func NewEnv(p *Env) *Env {
 	return &Env{
 		Env: p,
 		Sym: make(map[string]*Type),
+		Imm: make(map[string]*Object),
 		Obj: make(map[string]*Object),
 	}
 }

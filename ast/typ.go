@@ -1,13 +1,15 @@
 package ast
 
 import (
+	"strconv"
+
 	"github.com/paraskun/ess-go/lex"
 	"github.com/paraskun/ess-go/typ"
 )
 
 type typer struct {
 	env *typ.Env
-	fun *typ.FuncType
+	fun *FuncDecl
 }
 
 func Typeset(p *Pragma) {
@@ -59,12 +61,12 @@ func (t *typer) visitReturnStmt(r *ReturnStmt) {
 		re = append(re, i.Type()...)
 	}
 
-	if len(re) != len(t.fun.Ret) {
+	if len(re) != len(t.fun.Spec.Ret) {
 		panic("return disbalance")
 	}
 
 	for i, r := range re {
-		if !r.Equal(t.fun.Ret[i].Type) {
+		if !r.Equal(t.fun.Spec.Ret[i].Typ.Type()) {
 			panic("type mismatch")
 		}
 	}
@@ -122,7 +124,7 @@ func (t *typer) VisitDecl(u Decl) {
 		d.Body.Env = typ.NewEnv(t.env)
 		t.env = d.Body.Env
 		t.visitTypeSpec(d.Spec)
-		t.fun = d.Spec.Typ.Info.(*typ.FuncType)
+		t.fun = d
 		d.Body.Accept(t)
 		t.fun = nil
 
@@ -178,6 +180,10 @@ func (t *typer) visitTypeSpec(u TypeSpec) {
 			t.env.Obj[fs.Tok.Lit] = &typ.Object{
 				Typ: fs.Typ.Type(),
 				Env: t.env,
+			}
+
+			if fs.Typ.Type().Kind == typ.COMP {
+				t.env.Obj[fs.Tok.Lit].Ref = true
 			}
 
 			ft.Arg = append(ft.Arg, typ.Field{
@@ -242,14 +248,33 @@ func (t *typer) visitTypeSpec(u TypeSpec) {
 func (t *typer) VisitExpr(u Expr) {
 	switch e := u.(type) {
 	case *BaseImmExpr:
+		if obj, ok := t.fun.Body.Env.Imm[e.Tok.Lit]; ok {
+			e.Obj = obj
+
+			break
+		}
+
+		e.Obj = &typ.Object{
+			Env: t.fun.Body.Env,
+		}
+
 		switch e.Tok.TokenType {
 		case lex.II64:
-			e.Typ = &typ.Sig64Type
+			e.Obj.Typ = &typ.Sig64Type
+			e.Obj.Val, _ = strconv.ParseInt(e.Tok.Lit, 10, 64)
 		case lex.IU64:
-			e.Typ = &typ.Uns64Type
+			e.Obj.Typ = &typ.Uns64Type
+			e.Obj.Val, _ = strconv.ParseUint(e.Tok.Lit[:len(e.Tok.Lit)-1], 10, 64)
 		case lex.IF64:
-			e.Typ = &typ.Flt64Type
+			e.Obj.Typ = &typ.Flt64Type
+			e.Obj.Val, _ = strconv.ParseFloat(e.Tok.Lit, 64)
+		case lex.TRUE, lex.FALSE:
+			e.Obj.Typ = &typ.BoolType
+			e.Obj.Val, _ = strconv.ParseBool(e.Tok.Lit)
 		}
+
+		t.fun.Body.Env.Imm[e.Tok.Lit] = e.Obj
+
 	case *CompImmExpr:
 		tt, _ := t.env.LookupSym(e.Tok.Lit)
 
@@ -276,14 +301,13 @@ func (t *typer) VisitExpr(u Expr) {
 				panic("type mismatch")
 			}
 		}
-	case *IdfExpr:
-		obj, _ := t.env.LookupObj(e.Tok.Lit)
 
-		if obj == nil {
+	case *IdfExpr:
+		e.Obj, _ = t.env.LookupObj(e.Tok.Lit)
+
+		if e.Obj == nil {
 			panic("undefined variable")
 		}
-
-		e.Typ = obj.Typ
 	case *DotExpr:
 		e.Comp.Accept(t)
 
@@ -303,6 +327,7 @@ func (t *typer) VisitExpr(u Expr) {
 		}
 
 		e.Typ = f.Type
+
 	case *InfExpr:
 		e.X.Accept(t)
 		e.Y.Accept(t)
@@ -323,9 +348,11 @@ func (t *typer) VisitExpr(u Expr) {
 		}
 
 		e.Typ = tx
+
 	case *PfxExpr:
 		e.X.Accept(t)
 		e.Typ = e.X.Type()[0]
+
 	case *CallExpr:
 		tt, _ := t.env.LookupObj(e.Tok.Lit)
 
@@ -355,6 +382,7 @@ func (t *typer) VisitExpr(u Expr) {
 		for _, ret := range ft.Ret {
 			e.Typ = append(e.Typ, ret.Type)
 		}
+
 	case *ToSigExpr:
 		e.X.Accept(t)
 
@@ -368,6 +396,7 @@ func (t *typer) VisitExpr(u Expr) {
 		}
 
 		e.Typ = &typ.Sig64Type
+
 	case *ToUnsExpr:
 		e.X.Accept(t)
 
@@ -381,6 +410,7 @@ func (t *typer) VisitExpr(u Expr) {
 		}
 
 		e.Typ = &typ.Uns64Type
+
 	case *ToFltExpr:
 		e.X.Accept(t)
 
