@@ -201,7 +201,8 @@ type (
 	}
 
 	FieldSpec struct {
-		Tok *lex.Token // maybe nil
+		Tok *lex.Token  // maybe nil
+		Obj *typ.Object // maybe nil
 		Typ TypeSpec
 	}
 

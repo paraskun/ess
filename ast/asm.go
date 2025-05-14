@@ -22,14 +22,22 @@ type assembler struct {
 	env *typ.Env
 	obj *run.Pragma
 	buf *bytes.Buffer
+	fun map[string]int
+	off int
 }
 
 func (a *assembler) VisitDecl(u Decl) {
 	switch d := u.(type) {
 	case *FuncDecl:
 		img := run.FuncImage{}
+		info := d.Spec.Type().Info.(*typ.FuncType)
 
-		img.
+		a.buf = &bytes.Buffer{}
+
+		d.Body.Accept(a)
+
+		a.fun[d.Tok.Lit] = len(a.obj.Img)
+		a.obj.Img = append(a.obj.Img, img)
 	}
 }
 

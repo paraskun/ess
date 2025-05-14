@@ -8,7 +8,8 @@ const (
 
 	// Function execution
 
-	CALL // call <idx:4>
+	CALLI // calli <idx:4>
+	CALLS // calls
 	RET
 
 	// Memory

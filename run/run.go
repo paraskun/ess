@@ -15,7 +15,7 @@ type (
 		ArgsSize int
 
 		Imm  []byte
-		Call []uint
+		Call []int
 		Code []byte
 	}
 

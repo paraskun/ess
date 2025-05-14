@@ -123,7 +123,7 @@ func (t *typer) VisitDecl(u Decl) {
 
 		d.Body.Env = typ.NewEnv(t.env)
 		t.env = d.Body.Env
-		t.visitTypeSpec(d.Spec)
+		t.visitTypeSpec(d.Spec, true)
 		t.fun = d
 		d.Body.Accept(t)
 		t.fun = nil
@@ -137,12 +137,12 @@ func (t *typer) VisitDecl(u Decl) {
 			panic("name collision")
 		}
 
-		t.visitTypeSpec(d.Spec)
+		t.visitTypeSpec(d.Spec, false)
 		t.env.Sym[d.Tok.Lit] = d.Spec.Typ
 	}
 }
 
-func (t *typer) visitTypeSpec(u TypeSpec) {
+func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
 	switch s := u.(type) {
 	case *BaseSpec:
 		switch s.Tok.TokenType {
@@ -167,23 +167,25 @@ func (t *typer) visitTypeSpec(u TypeSpec) {
 		ft := typ.FuncType{}
 
 		for _, fs := range s.Arg {
-			if fs.Tok == nil {
-				panic("unnamed argument")
+			if env {
+				if fs.Tok == nil {
+					panic("unnamed argument")
+				}
+
+				if obj, lvl := t.env.LookupObj(fs.Tok.Lit); obj != nil && lvl == 0 {
+					panic("name collision")
+				}
 			}
 
-			t.visitTypeSpec(fs.Typ)
+			t.visitTypeSpec(fs.Typ, false)
 
-			if obj, lvl := t.env.LookupObj(fs.Tok.Lit); obj != nil && lvl == 0 {
-				panic("name collision")
-			}
+			if env {
+				fs.Obj = &typ.Object{Typ: fs.Typ.Type(), Env: t.env}
+				t.env.Obj[fs.Tok.Lit] = fs.Obj
 
-			t.env.Obj[fs.Tok.Lit] = &typ.Object{
-				Typ: fs.Typ.Type(),
-				Env: t.env,
-			}
-
-			if fs.Typ.Type().Kind == typ.COMP {
-				t.env.Obj[fs.Tok.Lit].Ref = true
+				if fs.Typ.Type().Kind == typ.COMP {
+					t.env.Obj[fs.Tok.Lit].Ref = true
+				}
 			}
 
 			ft.Arg = append(ft.Arg, typ.Field{
@@ -193,9 +195,11 @@ func (t *typer) visitTypeSpec(u TypeSpec) {
 		}
 
 		for _, fs := range s.Ret {
-			t.visitTypeSpec(fs.Typ)
+			t.visitTypeSpec(fs.Typ, false)
 
-			if fs.Tok != nil {
+			field := typ.Field{Type: fs.Typ.Type()}
+
+			if env && fs.Tok != nil {
 				if obj, lvl := t.env.LookupObj(fs.Tok.Lit); obj != nil && lvl == 0 {
 					panic("name collision")
 				}
@@ -204,12 +208,11 @@ func (t *typer) visitTypeSpec(u TypeSpec) {
 					Typ: fs.Typ.Type(),
 					Env: t.env,
 				}
+
+				field.Name = fs.Tok.Lit
 			}
 
-			ft.Ret = append(ft.Ret, typ.Field{
-				Name: "",
-				Type: fs.Typ.Type(),
-			})
+			ft.Ret = append(ft.Ret, field)
 		}
 
 		s.Typ = &typ.Type{
@@ -226,7 +229,7 @@ func (t *typer) visitTypeSpec(u TypeSpec) {
 				panic("unnamed field")
 			}
 
-			t.visitTypeSpec(fs.Typ)
+			t.visitTypeSpec(fs.Typ, false)
 
 			if _, ok := ct.Fields[fs.Tok.Lit]; ok {
 				panic("duplicate field")
