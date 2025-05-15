@@ -14,9 +14,10 @@ type (
 		DataSize int
 		ArgsSize int
 
-		Imm  []byte
+		Imm []byte
+		Src []byte
+
 		Call []int
-		Code []byte
 	}
 
 	FuncFrame struct {
@@ -61,72 +62,72 @@ func (m *Machine) Exec() {
 			if m.lu08() == 0 {
 				m.ip = unsafe.Pointer(&m.src[m.nu32()])
 			}
-		case LBI:
+		case LB:
 			ptr := unsafe.Add(m.bp, m.nu32())
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
 
 			m.su08(*(*uint8)(off))
-		case LDI:
+		case LD:
 			ptr := unsafe.Add(m.bp, m.nu32())
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
 
 			m.su64(*(*uint64)(off))
-		case SBI:
+		case SB:
 			ptr := unsafe.Add(m.bp, m.nu32())
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
 
 			*(*uint8)(off) = m.lu08()
-		case SDI:
+		case SD:
 			ptr := unsafe.Add(m.bp, m.nu32())
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
 
 			*(*uint64)(off) = m.lu64()
 		case ADDR:
-		case IADD:
+		case ADD:
 			m.si64(m.li64() + m.li64())
-		case ISUB:
+		case SUB:
 			m.si64(m.li64() - m.li64())
-		case IMUL:
+		case MUL:
 			m.si64(m.li64() * m.li64())
-		case IDIV:
+		case DIV:
 			m.si64(m.li64() / m.li64())
-		case IPOW:
+		case POW:
 			m.si64(int64(math.Pow(float64(m.li64()), float64(m.li64()))))
-		case ISHL:
+		case SHL:
 			m.si64(m.li64() << m.li64())
-		case ISHR:
+		case SHR:
 			m.si64(m.li64() >> m.li64())
-		case IMOD:
+		case MOD:
 			m.si64(m.li64() % m.li64())
-		case IXOR:
+		case XOR:
 			m.si64(m.li64() ^ m.li64())
-		case IAND:
+		case AND:
 			m.si64(m.li64() & m.li64())
-		case IOR:
+		case OR:
 			m.si64(m.li64() | m.li64())
-		case IBNEG:
+		case BNEG:
 			m.si64(^m.li64())
-		case IUNEG:
+		case UNEG:
 			m.si64(-m.li64())
-		case ILT:
+		case LT:
 			if m.li64() < m.li64() {
 				m.su08(1)
 			} else {
 				m.su08(0)
 			}
-		case ILE:
+		case LE:
 			if m.li64() <= m.li64() {
 				m.su08(1)
 			} else {
 				m.su08(0)
 			}
-		case IEQ:
+		case EQ:
 			if m.li64() == m.li64() {
 				m.su08(1)
 			} else {
 				m.su08(0)
 			}
-		case INE:
+		case NE:
 			if m.li64() != m.li64() {
 				m.su08(1)
 			} else {

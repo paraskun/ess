@@ -1,15 +1,16 @@
 package typ
 
-type Kind uint8
+import "fmt"
+
+type Kind byte
 
 const (
-	FUNC Kind = iota
-	COMP
-	BOOL
-
-	I64
-	U64
-	F64
+	FUNC Kind = 0b00000000
+	COMP      = 0b00100000
+	BOOL      = 0b01000000
+	I64       = 0b01100000
+	U64       = 0b10000000
+	F64       = 0b10100000
 )
 
 type (
@@ -24,7 +25,9 @@ type (
 
 	Field struct {
 		Name string
-		Type *Type
+
+		Typ *Type
+		Off int
 	}
 
 	FuncType struct {
@@ -45,7 +48,7 @@ func (t *Type) Size() (r int) {
 		return 8
 	case COMP:
 		for _, f := range t.Info.(*CompType).Fields {
-			r += f.Type.Size()
+			r += f.Typ.Size()
 		}
 	}
 
@@ -73,17 +76,17 @@ func (t *FuncType) Equal(o *FuncType) bool {
 	}
 
 	for i := range t.Arg {
-		if !t.Arg[i].Type.Equal(o.Arg[i].Type) {
+		if !t.Arg[i].Typ.Equal(o.Arg[i].Typ) {
 			return false
 		}
 	}
 
-	if len(t.Ret) != len(t.Ret) {
+	if len(t.Ret) != len(o.Ret) {
 		return false
 	}
 
 	for i := range t.Ret {
-		if !t.Ret[i].Type.Equal(o.Ret[i].Type) {
+		if !t.Ret[i].Typ.Equal(o.Ret[i].Typ) {
 			return false
 		}
 	}
@@ -126,7 +129,8 @@ func (o *Object) Size() int {
 }
 
 type Env struct {
-	*Env
+	Env *Env
+	Top *Env
 
 	Sym map[string]*Type
 	Imm map[string]*Object
@@ -136,10 +140,21 @@ type Env struct {
 func NewEnv(p *Env) *Env {
 	return &Env{
 		Env: p,
+		Top: p.Top,
 		Sym: make(map[string]*Type),
 		Imm: make(map[string]*Object),
 		Obj: make(map[string]*Object),
 	}
+}
+
+func (e *Env) InsertSym(name string, sym *Type) error {
+	if _, ok := e.Sym[name]; ok {
+		return fmt.Errorf("symbol name collision")
+	}
+
+	e.Sym[name] = sym
+
+	return nil
 }
 
 func (e *Env) LookupSym(name string) (*Type, int) {
@@ -156,6 +171,28 @@ func (e *Env) LookupSym(name string) (*Type, int) {
 	}
 
 	return nil, lvl
+}
+
+func (e *Env) InsertImm(lit string, imm *Object) {
+	if _, ok := e.Top.Imm[lit]; ok {
+		return
+	}
+
+	e.Top.Imm[lit] = imm
+}
+
+func (e *Env) LookupImm(lit string) *Object {
+	return e.Top.Imm[lit]
+}
+
+func (e *Env) InsertObj(name string, obj *Object) error {
+	if _, ok := e.Obj[name]; ok {
+		return fmt.Errorf("object name collision")
+	}
+
+	e.Obj[name] = obj
+
+	return nil
 }
 
 func (e *Env) LookupObj(name string) (*Object, int) {

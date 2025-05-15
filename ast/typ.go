@@ -9,7 +9,7 @@ import (
 
 type typer struct {
 	env *typ.Env
-	fun *FuncDecl
+	typ *typ.FuncType
 }
 
 func Typeset(p *Pragma) {
@@ -61,12 +61,12 @@ func (t *typer) visitReturnStmt(r *ReturnStmt) {
 		re = append(re, i.Type()...)
 	}
 
-	if len(re) != len(t.fun.Spec.Ret) {
+	if len(re) != len(t.typ.Ret) {
 		panic("return disbalance")
 	}
 
 	for i, r := range re {
-		if !r.Equal(t.fun.Spec.Ret[i].Typ.Type()) {
+		if !r.Equal(t.typ.Ret[i].Typ) {
 			panic("type mismatch")
 		}
 	}
@@ -88,13 +88,12 @@ func (t *typer) visitAssignStmt(a *AssignStmt) {
 		for i, j := range a.Var {
 			idf := j.(*IdfExpr)
 
-			if obj, lvl := t.env.LookupObj(idf.Tok.Lit); obj != nil && lvl != 0 {
-				panic("name collision")
-			}
-
-			t.env.Obj[idf.Tok.Lit] = &typ.Object{
+			if err := t.env.InsertObj(idf.Tok.Lit, &typ.Object{
 				Typ: re[i],
 				Env: t.env,
+				Off: -1,
+			}); err != nil {
+				panic(err)
 			}
 		}
 
@@ -117,28 +116,31 @@ func (t *typer) visitAssignStmt(a *AssignStmt) {
 func (t *typer) VisitDecl(u Decl) {
 	switch d := u.(type) {
 	case *FuncDecl:
-		if obj, lvl := t.env.LookupObj(d.Tok.Lit); obj != nil && lvl == 0 {
-			panic("name collision")
-		}
-
 		d.Body.Env = typ.NewEnv(t.env)
 		t.env = d.Body.Env
-		t.visitTypeSpec(d.Spec, true)
-		t.fun = d
-		d.Body.Accept(t)
-		t.fun = nil
+		t.env.Top = t.env
 
-		t.env.Obj[d.Tok.Lit] = &typ.Object{
-			Typ: d.Spec.Typ,
+		t.visitTypeSpec(d.Spec, true)
+
+		t.typ = d.Spec.Type().Info.(*typ.FuncType)
+
+		d.Body.Accept(t)
+
+		t.typ = nil
+
+		if err := t.env.InsertObj(d.Tok.Lit, &typ.Object{
+			Typ: d.Spec.Type(),
 			Env: t.env,
+			Off: -1,
+		}); err != nil {
+			panic(err)
 		}
 	case *CompDecl:
-		if obj, lvl := t.env.LookupSym(d.Tok.Lit); obj != nil && lvl == 0 {
-			panic("name collision")
-		}
-
 		t.visitTypeSpec(d.Spec, false)
-		t.env.Sym[d.Tok.Lit] = d.Spec.Typ
+
+		if err := t.env.InsertSym(d.Tok.Lit, d.Spec.Type()); err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -165,23 +167,21 @@ func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
 		}
 	case *FuncSpec:
 		ft := typ.FuncType{}
+		off := 0
 
 		for _, fs := range s.Arg {
+			t.visitTypeSpec(fs.Typ, false)
+
 			if env {
 				if fs.Tok == nil {
 					panic("unnamed argument")
 				}
 
-				if obj, lvl := t.env.LookupObj(fs.Tok.Lit); obj != nil && lvl == 0 {
-					panic("name collision")
+				fs.Obj = &typ.Object{Typ: fs.Typ.Type(), Env: t.env, Off: -1}
+
+				if err := t.env.InsertObj(fs.Tok.Lit, fs.Obj); err != nil {
+					panic(err)
 				}
-			}
-
-			t.visitTypeSpec(fs.Typ, false)
-
-			if env {
-				fs.Obj = &typ.Object{Typ: fs.Typ.Type(), Env: t.env}
-				t.env.Obj[fs.Tok.Lit] = fs.Obj
 
 				if fs.Typ.Type().Kind == typ.COMP {
 					t.env.Obj[fs.Tok.Lit].Ref = true
@@ -190,29 +190,38 @@ func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
 
 			ft.Arg = append(ft.Arg, typ.Field{
 				Name: fs.Tok.Lit,
-				Type: fs.Typ.Type(),
+				Typ:  fs.Typ.Type(),
+				Off:  off,
 			})
+
+			off += fs.Typ.Type().Size()
 		}
+
+		off = 0
 
 		for _, fs := range s.Ret {
 			t.visitTypeSpec(fs.Typ, false)
 
-			field := typ.Field{Type: fs.Typ.Type()}
-
-			if env && fs.Tok != nil {
-				if obj, lvl := t.env.LookupObj(fs.Tok.Lit); obj != nil && lvl == 0 {
-					panic("name collision")
-				}
-
-				t.env.Obj[fs.Tok.Lit] = &typ.Object{
-					Typ: fs.Typ.Type(),
-					Env: t.env,
-				}
-
-				field.Name = fs.Tok.Lit
+			rf := typ.Field{
+				Typ: fs.Typ.Type(),
+				Off: off,
 			}
 
-			ft.Ret = append(ft.Ret, field)
+			off += fs.Typ.Type().Size()
+
+			if env && fs.Tok != nil {
+				if err := t.env.InsertObj(fs.Tok.Lit, &typ.Object{
+					Typ: fs.Typ.Type(),
+					Env: t.env,
+					Off: -1,
+				}); err != nil {
+					panic(err)
+				}
+
+				rf.Name = fs.Tok.Lit
+			}
+
+			ft.Ret = append(ft.Ret, rf)
 		}
 
 		s.Typ = &typ.Type{
@@ -220,9 +229,8 @@ func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
 			Info: &ft,
 		}
 	case *CompSpec:
-		ct := typ.CompType{
-			Fields: make(map[string]typ.Field),
-		}
+		ct := typ.CompType{Fields: make(map[string]typ.Field)}
+		off := 0
 
 		for _, fs := range s.Fields {
 			if fs.Tok == nil {
@@ -237,8 +245,11 @@ func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
 
 			ct.Fields[fs.Tok.Lit] = typ.Field{
 				Name: fs.Tok.Lit,
-				Type: fs.Typ.Type(),
+				Typ:  fs.Typ.Type(),
+				Off:  off,
 			}
+
+			off += fs.Typ.Type().Size()
 		}
 
 		s.Typ = &typ.Type{
@@ -251,14 +262,14 @@ func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
 func (t *typer) VisitExpr(u Expr) {
 	switch e := u.(type) {
 	case *BaseImmExpr:
-		if obj, ok := t.fun.Body.Env.Imm[e.Tok.Lit]; ok {
-			e.Obj = obj
-
+		if imm := t.env.LookupImm(e.Tok.Lit); imm != nil {
+			e.Obj = imm
 			break
 		}
 
 		e.Obj = &typ.Object{
-			Env: t.fun.Body.Env,
+			Env: t.env.Top,
+			Off: -1,
 		}
 
 		switch e.Tok.TokenType {
@@ -276,7 +287,7 @@ func (t *typer) VisitExpr(u Expr) {
 			e.Obj.Val, _ = strconv.ParseBool(e.Tok.Lit)
 		}
 
-		t.fun.Body.Env.Imm[e.Tok.Lit] = e.Obj
+		t.env.InsertImm(e.Tok.Lit, e.Obj)
 
 	case *CompImmExpr:
 		tt, _ := t.env.LookupSym(e.Tok.Lit)
@@ -300,7 +311,7 @@ func (t *typer) VisitExpr(u Expr) {
 				panic("assignment disbalance")
 			}
 
-			if !cf.Type.Equal(f.Val.Type()[0]) {
+			if !cf.Typ.Equal(f.Val.Type()[0]) {
 				panic("type mismatch")
 			}
 		}
@@ -329,7 +340,7 @@ func (t *typer) VisitExpr(u Expr) {
 			panic("no such field")
 		}
 
-		e.Typ = f.Type
+		e.Typ = f.Typ
 
 	case *InfExpr:
 		e.X.Accept(t)
@@ -377,13 +388,13 @@ func (t *typer) VisitExpr(u Expr) {
 		}
 
 		for i, at := range re {
-			if !at.Equal(ft.Arg[i].Type) {
+			if !at.Equal(ft.Arg[i].Typ) {
 				panic("type mismatch")
 			}
 		}
 
 		for _, ret := range ft.Ret {
-			e.Typ = append(e.Typ, ret.Type)
+			e.Typ = append(e.Typ, ret.Typ)
 		}
 
 	case *ToSigExpr:

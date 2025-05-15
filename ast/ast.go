@@ -239,6 +239,7 @@ type (
 
 	FuncDecl struct {
 		Tok *lex.Token
+		Obj *typ.Object
 
 		Spec *FuncSpec
 		Body *BlockStmt

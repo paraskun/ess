@@ -1,6 +1,6 @@
 package lex
 
-type TokenType uint8
+type TokenType byte
 
 const (
 	EOF TokenType = iota
@@ -51,9 +51,9 @@ const (
 	LE  // <=
 	GT  // >
 	GE  // >=
-	EQ  // =
 	EEQ // ==
 	NE  // !=
+	EQ  // =
 
 	// Logical operators
 
