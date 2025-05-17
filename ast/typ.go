@@ -92,6 +92,7 @@ func (t *typer) visitAssignStmt(a *AssignStmt) {
 				Typ: re[i],
 				Env: t.env,
 				Off: -1,
+				Loc: true,
 			}); err != nil {
 				panic(err)
 			}
@@ -132,6 +133,7 @@ func (t *typer) VisitDecl(u Decl) {
 			Typ: d.Spec.Type(),
 			Env: t.env,
 			Off: -1,
+			Loc: false,
 		}); err != nil {
 			panic(err)
 		}
@@ -177,7 +179,12 @@ func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
 					panic("unnamed argument")
 				}
 
-				fs.Obj = &typ.Object{Typ: fs.Typ.Type(), Env: t.env, Off: -1}
+				fs.Obj = &typ.Object{
+					Typ: fs.Typ.Type(),
+					Env: t.env,
+					Off: -1,
+					Loc: true,
+				}
 
 				if err := t.env.InsertObj(fs.Tok.Lit, fs.Obj); err != nil {
 					panic(err)
@@ -214,6 +221,7 @@ func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
 					Typ: fs.Typ.Type(),
 					Env: t.env,
 					Off: -1,
+					Loc: true,
 				}); err != nil {
 					panic(err)
 				}
@@ -270,6 +278,7 @@ func (t *typer) VisitExpr(u Expr) {
 		e.Obj = &typ.Object{
 			Env: t.env.Top,
 			Off: -1,
+			Loc: true,
 		}
 
 		switch e.Tok.TokenType {
@@ -291,6 +300,7 @@ func (t *typer) VisitExpr(u Expr) {
 
 	case *CompImmExpr:
 		tt, _ := t.env.LookupSym(e.Tok.Lit)
+		po := 0
 
 		if tt == nil || tt.Kind != typ.COMP {
 			panic("undefined compound")
@@ -299,13 +309,17 @@ func (t *typer) VisitExpr(u Expr) {
 		ci := tt.Info.(*typ.CompType)
 
 		for _, f := range e.Fields {
-			f.Val.Accept(t)
-
 			cf, ok := ci.Fields[f.Tok.Lit]
 
 			if !ok {
 				panic("unknown field")
 			}
+
+			if cf.Off > po {
+				panic("unordered field")
+			}
+
+			f.Val.Accept(t)
 
 			if len(f.Val.Type()) > 1 {
 				panic("assignment disbalance")
@@ -314,6 +328,8 @@ func (t *typer) VisitExpr(u Expr) {
 			if !cf.Typ.Equal(f.Val.Type()[0]) {
 				panic("type mismatch")
 			}
+
+			po = cf.Off
 		}
 
 	case *IdfExpr:
@@ -346,6 +362,10 @@ func (t *typer) VisitExpr(u Expr) {
 		e.X.Accept(t)
 		e.Y.Accept(t)
 
+		if len(e.X.Type()) > 1 || len(e.Y.Type()) > 1 {
+			panic("improper use of multivariable expression")
+		}
+
 		tx := e.X.Type()[0]
 		ty := e.Y.Type()[0]
 
@@ -365,6 +385,11 @@ func (t *typer) VisitExpr(u Expr) {
 
 	case *PfxExpr:
 		e.X.Accept(t)
+
+		if len(e.X.Type()) > 1 {
+			panic("improper use of multivariable expression")
+		}
+
 		e.Typ = e.X.Type()[0]
 
 	case *CallExpr:

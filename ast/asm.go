@@ -61,62 +61,124 @@ func (asm *assembler) VisitDecl(u Decl) {
 	}
 }
 
-func (a *assembler) VisitStmt(u Stmt) {
+func (asm *assembler) VisitStmt(u Stmt) {
 	switch s := u.(type) {
 	case *BlockStmt:
+		for _, b := range s.Body {
+			b.Accept(asm)
+		}
 	case *AssignStmt:
+		s.Val[0].Accept(asm)
+		asm.getPosition(s.Var[0])
+
+		switch s.Var[0].Type()[0].Kind {
+		case typ.BOOL:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.SBSS))
+		case typ.I64, typ.U64, typ.F64:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.SDSS))
+		case typ.FUNC:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.SWSS))
+		case typ.COMP:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.SASS))
+			binary.Write(asm.src, binary.LittleEndian, uint64(s.Var[0].Type()[0].Size()))
+		}
 	case *LoopStmt:
 	case *CondStmt:
 	case *ReturnStmt:
 	}
 }
 
+func (asm *assembler) getPosition(u Expr) {}
+
 func (asm *assembler) VisitExpr(u Expr) {
 	switch exp := u.(type) {
 	case *BaseImmExpr:
+		switch exp.Type()[0].Kind {
+		case typ.BOOL:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LBII))
+			binary.Write(asm.src, binary.LittleEndian, 0)
+			binary.Write(asm.src, binary.LittleEndian, int32(exp.Obj.Off))
+		case typ.I64, typ.U64, typ.F64:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LDII))
+			binary.Write(asm.src, binary.LittleEndian, 0)
+			binary.Write(asm.src, binary.LittleEndian, int32(exp.Obj.Off))
+		}
+
 	case *CompImmExpr:
-	case *IdfExpr:
-	case *DotExpr:
+		for _, cf := range exp.Fields {
+			cf.Val.Accept(asm)
+		}
+
+	case *IdfExpr, *DotExpr:
+		asm.getPosition(exp)
+
+		t := exp.Type()[0]
+
+		switch t.Kind {
+		case typ.BOOL:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LBSS))
+		case typ.I64, typ.U64, typ.F64:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LDSS))
+		case typ.FUNC:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LWSS))
+		case typ.COMP:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LASS))
+			binary.Write(asm.src, binary.LittleEndian, uint32(t.Size()))
+		}
+
 	case *InfExpr:
-		exp.X.Accept(asm)
-		exp.Y.Accept(asm)
+		cmd := byte(0)
+		rev := false
 
 		switch exp.Tok.TokenType {
 		case lex.ADD:
-			asm.src.WriteByte(byte(run.ADD | exp.X.Type()[0].Kind))
+			cmd = byte(run.ADD | exp.X.Type()[0].Kind)
 		case lex.SUB:
-			asm.src.WriteByte(byte(run.SUB | exp.X.Type()[0].Kind))
+			cmd = byte(run.SUB | exp.X.Type()[0].Kind)
 		case lex.MUL:
-			asm.src.WriteByte(byte(run.MUL | exp.X.Type()[0].Kind))
+			cmd = byte(run.MUL | exp.X.Type()[0].Kind)
 		case lex.DIV:
-			asm.src.WriteByte(byte(run.DIV | exp.X.Type()[0].Kind))
+			cmd = byte(run.DIV | exp.X.Type()[0].Kind)
 		case lex.POW:
-			asm.src.WriteByte(byte(run.POW | exp.X.Type()[0].Kind))
+			cmd = byte(run.POW | exp.X.Type()[0].Kind)
 		case lex.SHL:
-			asm.src.WriteByte(byte(run.SHL | exp.X.Type()[0].Kind))
+			cmd = byte(run.SHL | exp.X.Type()[0].Kind)
 		case lex.SHR:
-			asm.src.WriteByte(byte(run.SHR | exp.X.Type()[0].Kind))
+			cmd = byte(run.SHR | exp.X.Type()[0].Kind)
 		case lex.MOD:
-			asm.src.WriteByte(byte(run.MOD | exp.X.Type()[0].Kind))
+			cmd = byte(run.MOD | exp.X.Type()[0].Kind)
 		case lex.BAND, lex.LAND:
-			asm.src.WriteByte(byte(run.AND | exp.X.Type()[0].Kind))
+			cmd = byte(run.AND | exp.X.Type()[0].Kind)
 		case lex.BOR, lex.LOR:
-			asm.src.WriteByte(byte(run.OR | exp.X.Type()[0].Kind))
+			cmd = byte(run.OR | exp.X.Type()[0].Kind)
 		case lex.BXOR:
-			asm.src.WriteByte(byte(run.XOR | exp.X.Type()[0].Kind))
+			cmd = byte(run.XOR | exp.X.Type()[0].Kind)
 		case lex.LT:
-			asm.src.WriteByte(byte(run.LT | exp.X.Type()[0].Kind))
+			cmd = byte(run.LT | exp.X.Type()[0].Kind)
 		case lex.LE:
-			asm.src.WriteByte(byte(run.LE | exp.X.Type()[0].Kind))
+			cmd = byte(run.LE | exp.X.Type()[0].Kind)
 		case lex.GT:
-			asm.src.WriteByte(byte(run.GT | exp.X.Type()[0].Kind))
+			cmd = byte(run.LE | exp.X.Type()[0].Kind)
+			rev = true
 		case lex.GE:
-			asm.src.WriteByte(byte(run.GE | exp.X.Type()[0].Kind))
+			cmd = byte(run.LT | exp.X.Type()[0].Kind)
+			rev = true
 		case lex.EEQ:
-			asm.src.WriteByte(byte(run.EQ | exp.X.Type()[0].Kind))
+			cmd = byte(run.EQ | exp.X.Type()[0].Kind)
 		case lex.NE:
-			asm.src.WriteByte(byte(run.NE | exp.X.Type()[0].Kind))
+			cmd = byte(run.NE | exp.X.Type()[0].Kind)
 		}
+
+		if rev {
+			exp.X.Accept(asm)
+			exp.Y.Accept(asm)
+		} else {
+			exp.Y.Accept(asm)
+			exp.X.Accept(asm)
+		}
+
+		asm.src.WriteByte(cmd)
+
 	case *PfxExpr:
 		exp.X.Accept(asm)
 
@@ -126,6 +188,7 @@ func (asm *assembler) VisitExpr(u Expr) {
 		case lex.UNEG:
 			asm.src.WriteByte(byte(run.UNEG) | byte(exp.X.Type()[0].Kind))
 		}
+
 	case *CallExpr:
 		for _, arg := range exp.Arg {
 			arg.Accept(asm)
@@ -133,6 +196,7 @@ func (asm *assembler) VisitExpr(u Expr) {
 
 		exp.Exe.Accept(asm)
 		asm.src.WriteByte(byte(run.CALLS))
+
 	case *ToSigExpr:
 		exp.X.Accept(asm)
 
@@ -142,6 +206,7 @@ func (asm *assembler) VisitExpr(u Expr) {
 		case typ.F64:
 			binary.Write(asm.src, binary.LittleEndian, run.F2I)
 		}
+
 	case *ToUnsExpr:
 		exp.X.Accept(asm)
 
@@ -151,6 +216,7 @@ func (asm *assembler) VisitExpr(u Expr) {
 		case typ.F64:
 			binary.Write(asm.src, binary.LittleEndian, run.F2U)
 		}
+
 	case *ToFltExpr:
 		exp.X.Accept(asm)
 

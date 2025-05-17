@@ -116,6 +116,7 @@ type Object struct {
 	Typ *Type
 	Env *Env
 	Ref bool
+	Loc bool
 	Val any
 	Off int
 }

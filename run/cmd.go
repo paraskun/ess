@@ -21,77 +21,91 @@ const (
 
 	// Memory
 
+	PUSH = 0x1f
+
+	PUSHB = PUSH              // pushb <val:1>
+	PUSHW = PUSH | 0b00100000 // pushw <val:4>
+	PUSHD = PUSH | 0b01000000 // pushd <val:8>
+
 	ADDRI = 0x04            // addri <idx:4>
 	ADDRS = ADDI | (1 << 5) // addrs
 
 	LB = 0x05
 	LW = 0x06
 	LD = 0x07
+	LA = 0x08
 
-	SB = 0x08
-	SW = 0x09
-	SD = 0x0a
+	SB = 0x09
+	SW = 0x0a
+	SD = 0x0b
+	SA = 0x0c
 
 	LBII = LB // lbii <idx:4> <off:4>
 	LWII = LW // lwii <idx:4> <off:4>
 	LDII = LD // ldii <idx:4> <off:4>
+	LAII = LA // laii <idx:4> <off:4> <num:4>
 
 	SBII = SB // sbii <idx:4> <off:4>
 	SWII = SW // swii <idx:4> <off:4>
 	SDII = SD // sdii <idx:4> <off:4>
+	SAII = SA // saii <idx:4> <off:4> <num:4>
 
 	LBIS = LB | (1 << 6) // lbis <idx:4>
 	LWIS = LW | (1 << 6) // lwis <idx:4>
 	LDIS = LD | (1 << 6) // ldis <idx:4>
+	LAIS = LA | (1 << 6) // lais <idx:4> <num:4>
 
 	SBIS = SB | (1 << 6) // sbis <idx:4>
 	SWIS = SW | (1 << 6) // swis <idx:4>
 	SDIS = SD | (1 << 6) // sdis <idx:4>
+	SAIS = SA | (1 << 6) // sais <idx:4> <num:4>
 
 	LBSI = LB | (1 << 5) // lbsi <off:4>
-	LWSI = LB | (1 << 5) // lwsi <off:4>
-	LDSI = LB | (1 << 5) // ldsi <off:4>
+	LWSI = LW | (1 << 5) // lwsi <off:4>
+	LDSI = LD | (1 << 5) // ldsi <off:4>
+	LASI = LA | (1 << 5) // lasi <off:4> <num:4>
 
 	SBSI = SB | (1 << 5) // sbsi <off:4>
-	SWSI = SB | (1 << 5) // swsi <off:4>
-	SDSI = SB | (1 << 5) // sdsi <off:4>
+	SWSI = SW | (1 << 5) // swsi <off:4>
+	SDSI = SD | (1 << 5) // sdsi <off:4>
+	SASI = SA | (1 << 5) // sasi <off:4> <num:4>
 
 	LBSS = LB | (1 << 5) | (1 << 6) // lbss
-	LWSS = LB | (1 << 5) | (1 << 6) // lwss
-	LDSS = LB | (1 << 5) | (1 << 6) // ldss
+	LWSS = LW | (1 << 5) | (1 << 6) // lwss
+	LDSS = LD | (1 << 5) | (1 << 6) // ldss
+	LASS = LA | (1 << 5) | (1 << 6) // lass <num:4>
 
 	SBSS = SB | (1 << 5) | (1 << 6) // sbss
-	SWSS = SB | (1 << 5) | (1 << 6) // swss
-	SDSS = SB | (1 << 5) | (1 << 6) // sdss
+	SWSS = SW | (1 << 5) | (1 << 6) // swss
+	SDSS = SD | (1 << 5) | (1 << 6) // sdss
+	SASS = SD | (1 << 5) | (1 << 6) // sdss <num:4>
 
 	// Type conversion
 
-	I2U = 0x0b | (0b00000000) // i2u
-	I2F = 0x0b | (0b00100000) // i2f
-	U2I = 0x0b | (0b01000000) // u2i
-	U2F = 0x0b | (0b01100000) // u2f
-	F2I = 0x0b | (0b10000000) // f2i
-	F2U = 0x0b | (0b10100000) // f2u
+	I2U = 0x0d | (0b00000000) // i2u
+	I2F = 0x0d | (0b00100000) // i2f
+	U2I = 0x0d | (0b01000000) // u2i
+	U2F = 0x0d | (0b01100000) // u2f
+	F2I = 0x0d | (0b10000000) // f2i
+	F2U = 0x0d | (0b10100000) // f2u
 
-	ADD = 0x0c
-	SUB = 0x0d
-	MUL = 0x0e
-	DIV = 0x0f
-	POW = 0x10
-	SHL = 0x11
-	SHR = 0x12
-	MOD = 0x13
-	XOR = 0x14
-	AND = 0x15
-	OR  = 0x16
+	ADD = 0x0e
+	SUB = 0x0f
+	MUL = 0x10
+	DIV = 0x11
+	POW = 0x12
+	SHL = 0x13
+	SHR = 0x14
+	MOD = 0x15
+	XOR = 0x16
+	AND = 0x17
+	OR  = 0x19
 
-	BNEG = 0x17
-	UNEG = 0x18
+	BNEG = 0x19
+	UNEG = 0x1a
 
-	LT = 0x19
-	LE = 0x1a
-	GT = 0x1b
-	GE = 0x1c
+	LT = 0x1b
+	LE = 0x1c
 	EQ = 0x1d
 	NE = 0x1e
 
@@ -115,8 +129,6 @@ const (
 
 	LTI = LT | typ.I64
 	LEI = LE | typ.I64
-	GTI = GT | typ.I64
-	GEI = GE | typ.I64
 	EQI = EQ | typ.I64
 	NEI = NE | typ.I64
 
@@ -140,8 +152,6 @@ const (
 
 	LTU = LT | typ.U64
 	LEU = LE | typ.U64
-	GTU = GT | typ.U64
-	GEU = GE | typ.U64
 	EQU = EQ | typ.U64
 	NEU = NE | typ.U64
 
@@ -157,8 +167,6 @@ const (
 
 	LTF = LT | typ.F64
 	LEF = LE | typ.F64
-	GTF = GT | typ.F64
-	GEF = GE | typ.F64
 	EQF = EQ | typ.F64
 	NEF = NE | typ.F64
 
