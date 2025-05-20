@@ -7,8 +7,8 @@ import (
 type Code byte
 
 const (
-	JMP Code = 0x00 // jmp
-	JIF      = 0x01 // jif
+	JMP Code = 0x00 // jmp <idx:4>
+	JIF      = 0x01 // jif <idx:4>
 
 	// Function execution
 
@@ -27,8 +27,10 @@ const (
 	PUSHW = PUSH | 0b00100000 // pushw <val:4>
 	PUSHD = PUSH | 0b01000000 // pushd <val:8>
 
-	ADDRI = 0x04            // addri <idx:4>
-	ADDRS = ADDI | (1 << 5) // addrs
+	ADDR = 0x04
+
+	ADDRI = ADDR            // addri <idx:4>
+	ADDRS = ADDR | (1 << 5) // addrs
 
 	LB = 0x05
 	LW = 0x06
@@ -78,7 +80,7 @@ const (
 	SBSS = SB | (1 << 5) | (1 << 6) // sbss
 	SWSS = SW | (1 << 5) | (1 << 6) // swss
 	SDSS = SD | (1 << 5) | (1 << 6) // sdss
-	SASS = SD | (1 << 5) | (1 << 6) // sdss <num:4>
+	SASS = SA | (1 << 5) | (1 << 6) // sdss <num:4>
 
 	// Type conversion
 
@@ -99,7 +101,7 @@ const (
 	MOD = 0x15
 	XOR = 0x16
 	AND = 0x17
-	OR  = 0x19
+	OR  = 0x18
 
 	BNEG = 0x19
 	UNEG = 0x1a

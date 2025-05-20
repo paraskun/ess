@@ -17,25 +17,30 @@ type (
 	Type struct {
 		Kind Kind
 
-		// Composite type info
-		// 	- func -> *FuncType
-		//	- comp -> *CompType
+		// Composite type info.
+		//
+		// 	- FUNC -> *FuncType
+		//	- COMP -> *CompType
 		Info any
 	}
 
 	Field struct {
-		Name string
+		Name string // maybe empty
 
+		// Typ specifies fields type.
 		Typ *Type
+
+		// Off is an offset in bytes within
+		// the surrounding object.
 		Off int
 	}
 
-	FuncType struct {
+	FuncInfo struct {
 		Arg []Field
 		Ret []Field
 	}
 
-	CompType struct {
+	CompInfo struct {
 		Fields map[string]Field
 	}
 )
@@ -44,10 +49,12 @@ func (t *Type) Size() (r int) {
 	switch t.Kind {
 	case BOOL:
 		return 1
-	case I64, U64, F64, FUNC:
+	case I64, U64, F64:
 		return 8
+	case FUNC:
+		return 4
 	case COMP:
-		for _, f := range t.Info.(*CompType).Fields {
+		for _, f := range t.Info.(*CompInfo).Fields {
 			r += f.Typ.Size()
 		}
 	}
@@ -62,7 +69,7 @@ func (t *Type) Equal(o *Type) bool {
 
 	switch t.Kind {
 	case FUNC:
-		return t.Info.(*FuncType).Equal(o.Info.(*FuncType))
+		return t.Info.(*FuncInfo).Equal(o.Info.(*FuncInfo))
 	case COMP:
 		return t == o
 	}
@@ -70,7 +77,7 @@ func (t *Type) Equal(o *Type) bool {
 	return true
 }
 
-func (t *FuncType) Equal(o *FuncType) bool {
+func (t *FuncInfo) Equal(o *FuncInfo) bool {
 	if len(t.Arg) != len(o.Arg) {
 		return false
 	}
@@ -112,12 +119,35 @@ var (
 	}
 )
 
+// Object is a global variable (function),
+// local variable or (local) literal.
 type Object struct {
+	// Typ specifies objects type.
 	Typ *Type
-	Env *Env
+
+	// Ref indicates whether object
+	// stored directly or by
+	// reference pointer.
 	Ref bool
+
+	// Loc indicates whether object
+	// is local or not (function or not).
 	Loc bool
+
+	// Val constains constant values
+	// infered at compile time.
+	//
+	//	- FUNC -> uint - deterministic
+	//			global function number
+	//	- COMP -> nil
+	//  - BOOL -> bool
+	//  - I64 -> int64
+	//  - U64 -> uint64
+	//  - F64 -> float64
 	Val any
+
+	// Off contains offset in bytes inside
+	// parenting environment.
 	Off int
 }
 
@@ -129,31 +159,43 @@ func (o *Object) Size() int {
 	return o.Typ.Size()
 }
 
+// Env is an environment associate with a block.
 type Env struct {
-	Env *Env
-	Top *Env
+	Parent *Env
 
-	Sym map[string]*Type
-	Imm map[string]*Object
-	Obj map[string]*Object
+	// Root is a reference to nearest
+	// parenting environment associated
+	// with a function.
+	Root *Env
+
+	// sym table contains type definitions.
+	sym map[string]*Type
+
+	// imm table contains immediate objects
+	// (literals) used in associated function.
+	imm map[string]*Object
+
+	// obj table contains local variables
+	// defined in associated block.
+	obj map[string]*Object
 }
 
 func NewEnv(p *Env) *Env {
 	return &Env{
-		Env: p,
-		Top: p.Top,
-		Sym: make(map[string]*Type),
-		Imm: make(map[string]*Object),
-		Obj: make(map[string]*Object),
+		Parent: p,
+		Root:   p.Root,
+		sym:    make(map[string]*Type),
+		imm:    make(map[string]*Object),
+		obj:    make(map[string]*Object),
 	}
 }
 
 func (e *Env) InsertSym(name string, sym *Type) error {
-	if _, ok := e.Sym[name]; ok {
-		return fmt.Errorf("symbol name collision")
+	if _, ok := e.sym[name]; ok {
+		return fmt.Errorf("\"%s\" already defined in current environment", name)
 	}
 
-	e.Sym[name] = sym
+	e.sym[name] = sym
 
 	return nil
 }
@@ -163,35 +205,35 @@ func (e *Env) LookupSym(name string) (*Type, int) {
 	lvl := 0
 
 	for env != nil {
-		if sym, ok := env.Sym[name]; ok {
+		if sym, ok := env.sym[name]; ok {
 			return sym, lvl
 		}
 
 		lvl += 1
-		env = env.Env
+		env = env.Parent
 	}
 
 	return nil, lvl
 }
 
 func (e *Env) InsertImm(lit string, imm *Object) {
-	if _, ok := e.Top.Imm[lit]; ok {
+	if _, ok := e.Root.imm[lit]; ok {
 		return
 	}
 
-	e.Top.Imm[lit] = imm
+	e.Root.imm[lit] = imm
 }
 
 func (e *Env) LookupImm(lit string) *Object {
-	return e.Top.Imm[lit]
+	return e.Root.imm[lit]
 }
 
 func (e *Env) InsertObj(name string, obj *Object) error {
-	if _, ok := e.Obj[name]; ok {
-		return fmt.Errorf("object name collision")
+	if _, ok := e.obj[name]; ok {
+		return fmt.Errorf("\"%s\" already defined in current environment", name)
 	}
 
-	e.Obj[name] = obj
+	e.obj[name] = obj
 
 	return nil
 }
@@ -201,12 +243,16 @@ func (e *Env) LookupObj(name string) (*Object, int) {
 	lvl := 0
 
 	for env != nil {
-		if obj, ok := env.Obj[name]; ok {
+		if obj, ok := env.obj[name]; ok {
 			return obj, lvl
 		}
 
+		if env == e.Root {
+			break
+		}
+
 		lvl += 1
-		env = env.Env
+		env = env.Parent
 	}
 
 	return nil, lvl

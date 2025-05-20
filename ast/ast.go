@@ -27,15 +27,17 @@ type (
 	}
 
 	BlockStmt struct {
-		Env  *typ.Env
+		Tok *lex.Token
+		Env *typ.Env
+
 		Body []Stmt
 	}
 
 	AssignStmt struct {
 		Tok *lex.Token
-		Var []Expr
-		Val []Expr
-		New bool
+		Var Expr
+		Val Expr
+		Dec bool
 	}
 
 	LoopStmt struct {
@@ -53,7 +55,7 @@ type (
 
 	ReturnStmt struct {
 		Tok *lex.Token
-		Arg []Expr
+		Ret Expr
 	}
 )
 
@@ -75,7 +77,8 @@ type (
 	Expr interface {
 		Node
 
-		Type() []*typ.Type
+		Type() *typ.Type
+		lval() bool
 		expr()
 	}
 
@@ -126,9 +129,9 @@ type (
 
 	CallExpr struct {
 		Tok *lex.Token
-		Typ []*typ.Type
+		Typ *typ.Type
 
-		Exe Expr
+		Exe *lex.Token
 		Arg []Expr
 	}
 
@@ -165,16 +168,27 @@ func (e *ToSigExpr) Accept(v Visitor)   { v.VisitExpr(e) }
 func (e *ToUnsExpr) Accept(v Visitor)   { v.VisitExpr(e) }
 func (e *ToFltExpr) Accept(v Visitor)   { v.VisitExpr(e) }
 
-func (e *BaseImmExpr) Type() []*typ.Type { return []*typ.Type{e.Obj.Typ} }
-func (e *CompImmExpr) Type() []*typ.Type { return []*typ.Type{e.Typ} }
-func (e *IdfExpr) Type() []*typ.Type     { return []*typ.Type{e.Obj.Typ} }
-func (e *DotExpr) Type() []*typ.Type     { return []*typ.Type{e.Typ} }
-func (e *InfExpr) Type() []*typ.Type     { return []*typ.Type{e.Typ} }
-func (e *PfxExpr) Type() []*typ.Type     { return []*typ.Type{e.Typ} }
-func (e *CallExpr) Type() []*typ.Type    { return e.Typ }
-func (e *ToSigExpr) Type() []*typ.Type   { return []*typ.Type{e.Typ} }
-func (e *ToUnsExpr) Type() []*typ.Type   { return []*typ.Type{e.Typ} }
-func (e *ToFltExpr) Type() []*typ.Type   { return []*typ.Type{e.Typ} }
+func (e *BaseImmExpr) Type() *typ.Type { return e.Obj.Typ }
+func (e *CompImmExpr) Type() *typ.Type { return e.Typ }
+func (e *IdfExpr) Type() *typ.Type     { return e.Obj.Typ }
+func (e *DotExpr) Type() *typ.Type     { return e.Typ }
+func (e *InfExpr) Type() *typ.Type     { return e.Typ }
+func (e *PfxExpr) Type() *typ.Type     { return e.Typ }
+func (e *CallExpr) Type() *typ.Type    { return e.Typ }
+func (e *ToSigExpr) Type() *typ.Type   { return e.Typ }
+func (e *ToUnsExpr) Type() *typ.Type   { return e.Typ }
+func (e *ToFltExpr) Type() *typ.Type   { return e.Typ }
+
+func (e *BaseImmExpr) lval() bool { return false }
+func (e *CompImmExpr) lval() bool { return false }
+func (e *IdfExpr) lval() bool     { return true }
+func (e *DotExpr) lval() bool     { return e.Comp.lval() }
+func (e *InfExpr) lval() bool     { return false }
+func (e *PfxExpr) lval() bool     { return false }
+func (e *CallExpr) lval() bool    { return false }
+func (e *ToSigExpr) lval() bool   { return false }
+func (e *ToUnsExpr) lval() bool   { return false }
+func (e *ToFltExpr) lval() bool   { return false }
 
 func (*BaseImmExpr) expr() {}
 func (*CompImmExpr) expr() {}
@@ -239,6 +253,7 @@ type (
 
 	FuncDecl struct {
 		Tok *lex.Token
+		Env *typ.Env
 		Obj *typ.Object
 
 		Spec *FuncSpec
@@ -261,7 +276,8 @@ func (*CompDecl) stmt() {}
 func (*CompDecl) decl() {}
 
 type Pragma struct {
-	*BlockStmt
+	Env *typ.Env
+	Dec []Decl
 }
 
 type parser struct {
@@ -306,19 +322,28 @@ func (p *parser) expect(tt lex.TokenType) *lex.Token {
 
 func Parse(buf []rune) *Pragma {
 	p := parser{}
-	r := Pragma{
-		BlockStmt: &BlockStmt{
-			Env: typ.NewEnv(nil),
-		},
-	}
+	r := Pragma{}
 
 	p.lex.Load(buf)
 
 	for p.peek().TokenType != lex.EOF {
-		r.Body = append(r.Body, p.parseStmt())
+		r.Dec = append(r.Dec, p.parseDecl())
 	}
 
 	return &r
+}
+
+func (p *parser) parseDecl() Decl {
+	switch p.peek().TokenType {
+	case lex.FUNC:
+		return p.parseFuncDecl()
+	case lex.TYPE:
+		return p.parseCompDecl()
+	}
+
+	p.error(fmt.Errorf("declaration expected"))
+
+	return nil
 }
 
 func (p *parser) parseStmt() Stmt {
@@ -343,7 +368,9 @@ func (p *parser) parseStmt() Stmt {
 }
 
 func (p *parser) parseBlockStmt() *BlockStmt {
-	r := BlockStmt{}
+	r := BlockStmt{
+		Tok: p.expect(lex.LB),
+	}
 
 	for p.peek().TokenType != lex.RB {
 		r.Body = append(r.Body, p.parseStmt())
@@ -355,14 +382,7 @@ func (p *parser) parseBlockStmt() *BlockStmt {
 func (p *parser) parseReturnStmt() *ReturnStmt {
 	r := ReturnStmt{
 		Tok: p.expect(lex.RET),
-	}
-
-	for p.peek().TokenType != lex.SEM {
-		r.Arg = append(r.Arg, p.parseExpr0())
-
-		if p.peek().TokenType != lex.SEM {
-			p.expect(lex.COM)
-		}
+		Ret: p.parseExpr0(),
 	}
 
 	p.expect(lex.SEM)
@@ -376,36 +396,16 @@ func (p *parser) parseAssignStmt() *AssignStmt {
 	if p.peek().TokenType == lex.VAR {
 		p.next()
 
-		r.New = true
-
-		for p.peek().TokenType != lex.EQ {
-			r.Var = append(r.Val, &IdfExpr{
-				Tok: p.expect(lex.IDF),
-			})
-
-			if p.peek().TokenType != lex.EQ {
-				p.expect(lex.COM)
-			}
+		r.Dec = true
+		r.Var = &IdfExpr{
+			Tok: p.expect(lex.IDF),
 		}
 	} else {
-		for p.peek().TokenType != lex.EQ {
-			r.Var = append(r.Val, p.parseExpr6())
-
-			if p.peek().TokenType != lex.EQ {
-				p.expect(lex.COM)
-			}
-		}
+		r.Var = p.parseExpr6()
 	}
 
 	r.Tok = p.expect(lex.EQ)
-
-	for p.peek().TokenType != lex.SEM {
-		r.Val = append(r.Val, p.parseExpr0())
-
-		if p.peek().TokenType != lex.SEM {
-			p.expect(lex.COM)
-		}
-	}
+	r.Val = p.parseExpr0()
 
 	p.expect(lex.SEM)
 
@@ -418,15 +418,10 @@ func (p *parser) parseLoopStmt() *LoopStmt {
 	}
 
 	p.expect(lex.LP)
-
 	r.Con = p.parseExpr0()
-
 	p.expect(lex.RP)
-	p.expect(lex.LB)
 
 	r.Rep = p.parseBlockStmt()
-
-	p.expect(lex.RB)
 
 	return &r
 }
@@ -437,23 +432,15 @@ func (p *parser) parseCondStmt() *CondStmt {
 	}
 
 	p.expect(lex.LP)
-
 	r.Con = p.parseExpr0()
-
 	p.expect(lex.RP)
-	p.expect(lex.LB)
 
 	r.Pos = p.parseBlockStmt()
 
-	p.expect(lex.RB)
-
 	if p.peek().TokenType == lex.ELSE {
 		p.next()
-		p.expect(lex.LB)
 
 		r.Neg = p.parseBlockStmt()
-
-		p.expect(lex.RB)
 	}
 
 	return &r

@@ -88,7 +88,29 @@ func (asm *assembler) VisitStmt(u Stmt) {
 	}
 }
 
-func (asm *assembler) getPosition(u Expr) {}
+func (asm *assembler) getPosition(u Expr) (int, int) {
+	switch exp := u.(type) {
+	case *IdfExpr:
+		if !exp.Obj.Loc {
+			return -1, exp.Obj.Off
+		}
+
+		if exp.Obj.Ref {
+			return exp.Obj.Off, 0
+		}
+
+		return 0, exp.Obj.Off
+
+	case *DotExpr:
+		b, o := asm.getPosition(exp.Comp)
+		ct := exp.Comp.Type()[0].Info.(*typ.CompType)
+
+		return b, o + ct.Fields[exp.Field.Lit].Off
+
+	default:
+		panic("could not get position")
+	}
+}
 
 func (asm *assembler) VisitExpr(u Expr) {
 	switch exp := u.(type) {
