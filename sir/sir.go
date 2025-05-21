@@ -8,7 +8,6 @@ import (
 type builder struct {
 	env *typ.Env
 	src []Ins
-	tmp uint
 }
 
 func (*builder) VisitStmt(s ast.Stmt)
@@ -17,11 +16,11 @@ func (*builder) VisitDecl(d ast.Decl)
 
 func Build(p *ast.Pragma) (*typ.Env, []Ins) {
 	b := &builder{
-		env: &typ.Env{},
+		env: p.Env,
 	}
 
-	for _, s := range p.Body {
-		s.Accept(b)
+	for _, d := range p.Dec {
+		d.Accept(b)
 	}
 
 	return b.env, b.src

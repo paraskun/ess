@@ -11,12 +11,11 @@ type (
 	}
 
 	FuncImage struct {
-		DataSize int
-		ArgsSize int
+		DatSz int
+		ArgSz int
 
-		Imm []byte
-		Src []byte
-
+		Imm  []byte
+		Src  []byte
 		Call []int
 	}
 
@@ -45,7 +44,7 @@ func (m *Machine) loadFunc(n int) *FuncFrame {
 	fi := &m.Pragma.Img[n]
 	ff := &FuncFrame{
 		Func: fi,
-		Data: make([]byte, fi.DataSize),
+		Data: make([]byte, fi.DatSz),
 		Call: make([]*FuncFrame, len(fi.Call)),
 	}
 
@@ -87,10 +86,8 @@ func (m *Machine) Exec() {
 			if m.lu08() == 0 {
 				m.ip = unsafe.Pointer(&m.ff.Func.Src[m.nu32()])
 			}
-		case CALLI:
+		case CALL:
 			m.call(m.nu32())
-		case CALLS:
-			m.call(m.lu32())
 		case RET:
 			m.frame = m.frame[:len(m.frame)-1]
 			m.ff = m.frame[len(m.frame)-1]

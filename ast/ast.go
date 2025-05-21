@@ -130,8 +130,7 @@ type (
 	CallExpr struct {
 		Tok *lex.Token
 		Typ *typ.Type
-
-		Exe *lex.Token
+		Obj *typ.Object
 		Arg []Expr
 	}
 
@@ -223,14 +222,14 @@ type (
 	FuncSpec struct {
 		BaseSpec
 
-		Arg []FieldSpec
-		Ret []FieldSpec
+		Arg []*FieldSpec
+		Ret *FieldSpec
 	}
 
 	CompSpec struct {
 		BaseSpec
 
-		Fields []FieldSpec
+		Fields []*FieldSpec
 	}
 )
 
@@ -376,6 +375,8 @@ func (p *parser) parseBlockStmt() *BlockStmt {
 		r.Body = append(r.Body, p.parseStmt())
 	}
 
+	p.expect(lex.RB)
+
 	return &r
 }
 
@@ -450,23 +451,21 @@ func (p *parser) parseTypeSpec() TypeSpec {
 	switch p.peek().TokenType {
 	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDF:
 		return &BaseSpec{Tok: p.next()}
-	case lex.LB:
-		return p.parseCompSpec()
-	case lex.FUNC:
-		return p.parseFuncSpec()
 	}
 
 	panic("type specification expected")
 }
 
-func (p *parser) parseFieldSpec() (s FieldSpec) {
+func (p *parser) parseFieldSpec() *FieldSpec {
+	s := &FieldSpec{}
+
 	if p.peek().TokenType == lex.IDF {
 		s.Tok = p.next()
 	}
 
 	s.Typ = p.parseTypeSpec()
 
-	return
+	return s
 }
 
 func (p *parser) parseFuncSpec() *FuncSpec {
@@ -488,15 +487,7 @@ func (p *parser) parseFuncSpec() *FuncSpec {
 
 	if p.peek().TokenType == lex.LP {
 		p.next()
-
-		for p.peek().TokenType != lex.RP {
-			s.Ret = append(s.Ret, p.parseFieldSpec())
-
-			if p.peek().TokenType != lex.RP {
-				p.expect(lex.COM)
-			}
-		}
-
+		s.Ret = p.parseFieldSpec()
 		p.expect(lex.RP)
 	}
 
@@ -525,10 +516,7 @@ func (p *parser) parseFuncDecl() *FuncDecl {
 	p.expect(lex.FUNC)
 	f.Tok = p.expect(lex.IDF)
 	f.Spec = p.parseFuncSpec()
-
-	p.expect(lex.LB)
 	f.Body = p.parseBlockStmt()
-	p.expect(lex.RB)
 
 	return f
 }
@@ -673,57 +661,6 @@ func (p *parser) parseExpr6() Expr {
 			}
 
 			continue
-		case lex.LP:
-			switch p.prv.TokenType {
-			case lex.I64:
-				p.next()
-
-				cur = &ToSigExpr{
-					Tok: p.prv,
-					X:   p.parseExpr0(),
-				}
-
-				p.expect(lex.RP)
-			case lex.U64:
-				p.next()
-
-				cur = &ToUnsExpr{
-					Tok: p.prv,
-					X:   p.parseExpr0(),
-				}
-
-				p.expect(lex.RP)
-			case lex.F64:
-				p.next()
-
-				cur = &ToFltExpr{
-					Tok: p.prv,
-					X:   p.parseExpr0(),
-				}
-
-				p.expect(lex.RP)
-			default:
-				p.next()
-
-				exe := &CallExpr{
-					Tok: p.prv,
-					Exe: cur,
-				}
-
-				for p.peek().TokenType != lex.RP {
-					exe.Arg = append(exe.Arg, p.parseExpr0())
-
-					if p.peek().TokenType != lex.RP {
-						p.expect(lex.COM)
-					}
-				}
-
-				p.expect(lex.RP)
-
-				cur = exe
-			}
-
-			continue
 		}
 
 		break
@@ -733,8 +670,66 @@ func (p *parser) parseExpr6() Expr {
 }
 
 func (p *parser) parseExpr7() Expr {
+	cur := p.parseExpr8()
+
+	if p.peek().TokenType == lex.LP {
+		switch p.prv.TokenType {
+		case lex.I64:
+			p.next()
+
+			cur = &ToSigExpr{
+				Tok: p.prv,
+				X:   p.parseExpr0(),
+			}
+
+			p.expect(lex.RP)
+		case lex.U64:
+			p.next()
+
+			cur = &ToUnsExpr{
+				Tok: p.prv,
+				X:   p.parseExpr0(),
+			}
+
+			p.expect(lex.RP)
+		case lex.F64:
+			p.next()
+
+			cur = &ToFltExpr{
+				Tok: p.prv,
+				X:   p.parseExpr0(),
+			}
+
+			p.expect(lex.RP)
+		case lex.IDF:
+			p.next()
+
+			exe := &CallExpr{
+				Tok: p.prv,
+			}
+
+			for p.peek().TokenType != lex.RP {
+				exe.Arg = append(exe.Arg, p.parseExpr0())
+
+				if p.peek().TokenType != lex.RP {
+					p.expect(lex.COM)
+				}
+			}
+
+			p.expect(lex.RP)
+
+			cur = exe
+		default:
+			p.error(fmt.Errorf("could not call non-executable"))
+		}
+	}
+
+	return cur
+}
+
+func (p *parser) parseExpr8() Expr {
 	switch p.peek().TokenType {
-	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDF:
+	case lex.IDF:
 		par := p.next()
 
 		if p.peek().TokenType == lex.LB {

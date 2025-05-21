@@ -12,12 +12,8 @@ const (
 
 	// Function execution
 
-	CALL = 0x02
-
-	CALLI = CALL            // calli <idx:4>
-	CALLS = CALL | (1 << 5) // calls
-
-	RET = 0x03
+	CALL = 0x02 // call <idx:4>
+	RET  = 0x03
 
 	// Memory
 
@@ -81,6 +77,11 @@ const (
 	SWSS = SW | (1 << 5) | (1 << 6) // swss
 	SDSS = SD | (1 << 5) | (1 << 6) // sdss
 	SASS = SA | (1 << 5) | (1 << 6) // sdss <num:4>
+
+	LBI = LB | (1 << 7) // lbi <off:4>
+	LWI = LW | (1 << 7) // lwi <off:4>
+	LDI = LD | (1 << 7) // ldi <off:4>
+	LAI = LA | (1 << 7) // lai <off:4> <num:4>
 
 	// Type conversion
 

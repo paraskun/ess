@@ -11,17 +11,17 @@ import (
 
 func Assemble(p *Pragma) *run.Pragma {
 	a := assembler{
-		env: p.Env,
 		obj: &run.Pragma{},
 	}
 
-	p.Accept(&a)
+	for _, d := range p.Dec {
+		d.Accept(&a)
+	}
 
 	return a.obj
 }
 
 type assembler struct {
-	env *typ.Env
 	obj *run.Pragma
 	img *run.FuncImage
 	src *bytes.Buffer
@@ -31,32 +31,34 @@ func (asm *assembler) VisitDecl(u Decl) {
 	switch dec := u.(type) {
 	case *FuncDecl:
 		img := run.FuncImage{}
-		asm.src = &bytes.Buffer{}
+		src := &bytes.Buffer{}
+
+		asm.img = &img
 
 		for _, arg := range dec.Spec.Arg {
-			argSize := arg.Obj.Typ.Size()
+			argSz := arg.Obj.Typ.Size()
 
-			arg.Obj.Off = img.DataSize
-			img.DataSize += argSize
-			img.ArgsSize += argSize
+			arg.Obj.Off = img.DatSz
+			img.DatSz += argSz
+			img.ArgSz += argSz
 		}
 
 		buf := &bytes.Buffer{}
+		off := 0
 
-		for _, imm := range dec.Body.Env.Imm {
-			imm.Off = img.DataSize
-			img.DataSize += imm.Size()
+		for _, obj := range dec.Env.Imm {
+			obj.Off = off
+			off += obj.Size()
 
-			binary.Write(buf, binary.LittleEndian, imm.Val)
+			binary.Write(buf, binary.LittleEndian, obj.Val)
 		}
 
 		dec.Body.Accept(asm)
 
-		img.DataSize += 8
+		img.DatSz += 8
 		img.Imm = buf.Bytes()
-		img.Src = asm.src.Bytes()
+		img.Src = src.Bytes()
 
-		dec.Obj.Off = len(asm.obj.Img)
 		asm.obj.Img = append(asm.obj.Img, img)
 	}
 }
@@ -68,19 +70,28 @@ func (asm *assembler) VisitStmt(u Stmt) {
 			b.Accept(asm)
 		}
 	case *AssignStmt:
-		s.Val[0].Accept(asm)
-		asm.getPosition(s.Var[0])
+		s.Val.Accept(asm)
 
-		switch s.Var[0].Type()[0].Kind {
+		b, o := asm.getPosition(s.Var)
+
+		switch s.Var.Type().Kind {
 		case typ.BOOL:
-			binary.Write(asm.src, binary.LittleEndian, byte(run.SBSS))
+			binary.Write(asm.src, binary.LittleEndian, byte(run.SBII))
+			binary.Write(asm.src, binary.LittleEndian, uint32(b))
+			binary.Write(asm.src, binary.LittleEndian, uint32(o))
 		case typ.I64, typ.U64, typ.F64:
-			binary.Write(asm.src, binary.LittleEndian, byte(run.SDSS))
+			binary.Write(asm.src, binary.LittleEndian, byte(run.SDII))
+			binary.Write(asm.src, binary.LittleEndian, uint32(b))
+			binary.Write(asm.src, binary.LittleEndian, uint32(o))
 		case typ.FUNC:
-			binary.Write(asm.src, binary.LittleEndian, byte(run.SWSS))
+			binary.Write(asm.src, binary.LittleEndian, byte(run.SWII))
+			binary.Write(asm.src, binary.LittleEndian, uint32(b))
+			binary.Write(asm.src, binary.LittleEndian, uint32(o))
 		case typ.COMP:
-			binary.Write(asm.src, binary.LittleEndian, byte(run.SASS))
-			binary.Write(asm.src, binary.LittleEndian, uint64(s.Var[0].Type()[0].Size()))
+			binary.Write(asm.src, binary.LittleEndian, byte(run.SAII))
+			binary.Write(asm.src, binary.LittleEndian, uint32(b))
+			binary.Write(asm.src, binary.LittleEndian, uint32(o))
+			binary.Write(asm.src, binary.LittleEndian, uint32(s.Var.Type().Size()))
 		}
 	case *LoopStmt:
 	case *CondStmt:
@@ -88,107 +99,80 @@ func (asm *assembler) VisitStmt(u Stmt) {
 	}
 }
 
-func (asm *assembler) getPosition(u Expr) (int, int) {
-	switch exp := u.(type) {
-	case *IdfExpr:
-		if !exp.Obj.Loc {
-			return -1, exp.Obj.Off
-		}
-
-		if exp.Obj.Ref {
-			return exp.Obj.Off, 0
-		}
-
-		return 0, exp.Obj.Off
-
-	case *DotExpr:
-		b, o := asm.getPosition(exp.Comp)
-		ct := exp.Comp.Type()[0].Info.(*typ.CompType)
-
-		return b, o + ct.Fields[exp.Field.Lit].Off
-
-	default:
-		panic("could not get position")
-	}
-}
-
 func (asm *assembler) VisitExpr(u Expr) {
 	switch exp := u.(type) {
 	case *BaseImmExpr:
-		switch exp.Type()[0].Kind {
+		switch exp.Type().Kind {
+		case typ.BOOL:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LBI))
+			binary.Write(asm.src, binary.LittleEndian, uint32(exp.Obj.Off))
+		case typ.I64, typ.U64, typ.F64:
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LDI))
+			binary.Write(asm.src, binary.LittleEndian, uint32(exp.Obj.Off))
+		}
+	case *CompImmExpr:
+		for _, f := range exp.Fields {
+			f.Val.Accept(asm)
+		}
+	case *IdfExpr, *DotExpr:
+		b, o := asm.getPosition(exp)
+
+		switch exp.Type().Kind {
 		case typ.BOOL:
 			binary.Write(asm.src, binary.LittleEndian, byte(run.LBII))
-			binary.Write(asm.src, binary.LittleEndian, 0)
-			binary.Write(asm.src, binary.LittleEndian, int32(exp.Obj.Off))
+			binary.Write(asm.src, binary.LittleEndian, uint32(b))
+			binary.Write(asm.src, binary.LittleEndian, uint32(o))
 		case typ.I64, typ.U64, typ.F64:
 			binary.Write(asm.src, binary.LittleEndian, byte(run.LDII))
-			binary.Write(asm.src, binary.LittleEndian, 0)
-			binary.Write(asm.src, binary.LittleEndian, int32(exp.Obj.Off))
-		}
-
-	case *CompImmExpr:
-		for _, cf := range exp.Fields {
-			cf.Val.Accept(asm)
-		}
-
-	case *IdfExpr, *DotExpr:
-		asm.getPosition(exp)
-
-		t := exp.Type()[0]
-
-		switch t.Kind {
-		case typ.BOOL:
-			binary.Write(asm.src, binary.LittleEndian, byte(run.LBSS))
-		case typ.I64, typ.U64, typ.F64:
-			binary.Write(asm.src, binary.LittleEndian, byte(run.LDSS))
-		case typ.FUNC:
-			binary.Write(asm.src, binary.LittleEndian, byte(run.LWSS))
+			binary.Write(asm.src, binary.LittleEndian, uint32(b))
+			binary.Write(asm.src, binary.LittleEndian, uint32(o))
 		case typ.COMP:
-			binary.Write(asm.src, binary.LittleEndian, byte(run.LASS))
-			binary.Write(asm.src, binary.LittleEndian, uint32(t.Size()))
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LAII))
+			binary.Write(asm.src, binary.LittleEndian, uint32(b))
+			binary.Write(asm.src, binary.LittleEndian, uint32(o))
+			binary.Write(asm.src, binary.LittleEndian, uint32(exp.Type().Size()))
 		}
-
 	case *InfExpr:
 		cmd := byte(0)
 		rev := false
 
 		switch exp.Tok.TokenType {
 		case lex.ADD:
-			cmd = byte(run.ADD | exp.X.Type()[0].Kind)
+			cmd = byte(run.ADD | exp.X.Type().Kind)
 		case lex.SUB:
-			cmd = byte(run.SUB | exp.X.Type()[0].Kind)
+			cmd = byte(run.SUB | exp.X.Type().Kind)
 		case lex.MUL:
-			cmd = byte(run.MUL | exp.X.Type()[0].Kind)
+			cmd = byte(run.MUL | exp.X.Type().Kind)
 		case lex.DIV:
-			cmd = byte(run.DIV | exp.X.Type()[0].Kind)
+			cmd = byte(run.DIV | exp.X.Type().Kind)
 		case lex.POW:
-			cmd = byte(run.POW | exp.X.Type()[0].Kind)
+			cmd = byte(run.POW | exp.X.Type().Kind)
 		case lex.SHL:
-			cmd = byte(run.SHL | exp.X.Type()[0].Kind)
+			cmd = byte(run.SHL | exp.X.Type().Kind)
 		case lex.SHR:
-			cmd = byte(run.SHR | exp.X.Type()[0].Kind)
+			cmd = byte(run.SHR | exp.X.Type().Kind)
 		case lex.MOD:
-			cmd = byte(run.MOD | exp.X.Type()[0].Kind)
+			cmd = byte(run.MOD | exp.X.Type().Kind)
 		case lex.BAND, lex.LAND:
-			cmd = byte(run.AND | exp.X.Type()[0].Kind)
+			cmd = byte(run.AND | exp.X.Type().Kind)
 		case lex.BOR, lex.LOR:
-			cmd = byte(run.OR | exp.X.Type()[0].Kind)
+			cmd = byte(run.OR | exp.X.Type().Kind)
 		case lex.BXOR:
-			cmd = byte(run.XOR | exp.X.Type()[0].Kind)
+			cmd = byte(run.XOR | exp.X.Type().Kind)
 		case lex.LT:
-			cmd = byte(run.LT | exp.X.Type()[0].Kind)
+			cmd = byte(run.LT | exp.X.Type().Kind)
 		case lex.LE:
-			cmd = byte(run.LE | exp.X.Type()[0].Kind)
+			cmd = byte(run.LE | exp.X.Type().Kind)
 		case lex.GT:
-			cmd = byte(run.LE | exp.X.Type()[0].Kind)
+			cmd = byte(run.LE | exp.X.Type().Kind)
 			rev = true
 		case lex.GE:
-			cmd = byte(run.LT | exp.X.Type()[0].Kind)
+			cmd = byte(run.LT | exp.X.Type().Kind)
 			rev = true
 		case lex.EEQ:
-			cmd = byte(run.EQ | exp.X.Type()[0].Kind)
+			cmd = byte(run.EQ | exp.X.Type().Kind)
 		case lex.NE:
-			cmd = byte(run.NE | exp.X.Type()[0].Kind)
+			cmd = byte(run.NE | exp.X.Type().Kind)
 		}
 
 		if rev {
@@ -199,54 +183,63 @@ func (asm *assembler) VisitExpr(u Expr) {
 			exp.X.Accept(asm)
 		}
 
-		asm.src.WriteByte(cmd)
-
+		asm.src.WriteByte(byte(cmd))
 	case *PfxExpr:
 		exp.X.Accept(asm)
 
 		switch exp.Tok.TokenType {
 		case lex.BNEG, lex.LNEG:
-			asm.src.WriteByte(byte(run.BNEG) | byte(exp.X.Type()[0].Kind))
+			asm.src.WriteByte(byte(run.BNEG) | byte(exp.X.Type().Kind))
 		case lex.UNEG:
-			asm.src.WriteByte(byte(run.UNEG) | byte(exp.X.Type()[0].Kind))
+			asm.src.WriteByte(byte(run.UNEG) | byte(exp.X.Type().Kind))
 		}
-
 	case *CallExpr:
 		for _, arg := range exp.Arg {
 			arg.Accept(asm)
 		}
 
-		exp.Exe.Accept(asm)
-		asm.src.WriteByte(byte(run.CALLS))
+		idx := len(asm.img.Call)
+		asm.img.Call = append(asm.img.Call, exp.Obj.Off)
 
+		binary.Write(asm.src, binary.LittleEndian, byte(run.CALL))
+		binary.Write(asm.src, binary.LittleEndian, uint32(idx))
 	case *ToSigExpr:
 		exp.X.Accept(asm)
 
-		switch exp.X.Type()[0].Kind {
+		switch exp.X.Type().Kind {
 		case typ.U64:
-			binary.Write(asm.src, binary.LittleEndian, run.U2I)
+			binary.Write(asm.src, binary.LittleEndian, byte(run.U2I))
 		case typ.F64:
-			binary.Write(asm.src, binary.LittleEndian, run.F2I)
+			binary.Write(asm.src, binary.LittleEndian, byte(run.F2I))
 		}
-
 	case *ToUnsExpr:
 		exp.X.Accept(asm)
 
-		switch exp.X.Type()[0].Kind {
+		switch exp.X.Type().Kind {
 		case typ.I64:
-			binary.Write(asm.src, binary.LittleEndian, run.I2U)
+			binary.Write(asm.src, binary.LittleEndian, byte(run.I2U))
 		case typ.F64:
-			binary.Write(asm.src, binary.LittleEndian, run.F2U)
+			binary.Write(asm.src, binary.LittleEndian, byte(run.F2U))
 		}
-
 	case *ToFltExpr:
 		exp.X.Accept(asm)
 
-		switch exp.X.Type()[0].Kind {
+		switch exp.X.Type().Kind {
 		case typ.I64:
-			binary.Write(asm.src, binary.LittleEndian, run.I2F)
+			binary.Write(asm.src, binary.LittleEndian, byte(run.I2F))
 		case typ.U64:
-			binary.Write(asm.src, binary.LittleEndian, run.U2F)
+			binary.Write(asm.src, binary.LittleEndian, byte(run.U2F))
 		}
 	}
+}
+
+func (asm *assembler) getPosition(u Expr) (int, int) {
+	switch exp := u.(type) {
+	case *IdfExpr:
+		_ = exp
+	case *DotExpr:
+		_ = exp
+	}
+
+	return 0, 0
 }

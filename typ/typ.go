@@ -5,12 +5,13 @@ import "fmt"
 type Kind byte
 
 const (
-	FUNC Kind = 0b00000000
-	COMP      = 0b00100000
-	BOOL      = 0b01000000
-	I64       = 0b01100000
-	U64       = 0b10000000
-	F64       = 0b10100000
+	VOID Kind = 0b00000000
+	FUNC      = 0b00100000
+	COMP      = 0b01000000
+	BOOL      = 0b01100000
+	I64       = 0b10000000
+	U64       = 0b10100000
+	F64       = 0b11000000
 )
 
 type (
@@ -36,8 +37,8 @@ type (
 	}
 
 	FuncInfo struct {
-		Arg []Field
-		Ret []Field
+		Arg []*Field
+		Ret *Field
 	}
 
 	CompInfo struct {
@@ -88,20 +89,22 @@ func (t *FuncInfo) Equal(o *FuncInfo) bool {
 		}
 	}
 
-	if len(t.Ret) != len(o.Ret) {
+	if (t.Ret == nil && o.Ret != nil) || (t.Ret != nil && o.Ret == nil) {
 		return false
 	}
 
-	for i := range t.Ret {
-		if !t.Ret[i].Typ.Equal(o.Ret[i].Typ) {
-			return false
-		}
+	if !t.Ret.Typ.Equal(o.Ret.Typ) {
+		return false
 	}
 
 	return true
 }
 
 var (
+	VoidType = Type{
+		Kind: VOID,
+	}
+
 	BoolType = Type{
 		Kind: BOOL,
 	}
@@ -137,8 +140,6 @@ type Object struct {
 	// Val constains constant values
 	// infered at compile time.
 	//
-	//	- FUNC -> uint - deterministic
-	//			global function number
 	//	- COMP -> nil
 	//  - BOOL -> bool
 	//  - I64 -> int64
@@ -148,6 +149,9 @@ type Object struct {
 
 	// Off contains offset in bytes inside
 	// parenting environment.
+	//
+	// For functions Off specifies its global
+	// identifier.
 	Off int
 }
 
@@ -168,34 +172,42 @@ type Env struct {
 	// with a function.
 	Root *Env
 
-	// sym table contains type definitions.
-	sym map[string]*Type
+	// ImmSz indicates imm block size in bytes.
+	ImmSz int
 
-	// imm table contains immediate objects
+	// Sym table contains type definitions.
+	Sym map[string]*Type
+
+	// Imm table contains immediate objects
 	// (literals) used in associated function.
-	imm map[string]*Object
+	Imm map[string]*Object
 
-	// obj table contains local variables
+	// Obj table contains local variables
 	// defined in associated block.
-	obj map[string]*Object
+	Obj map[string]*Object
 }
 
 func NewEnv(p *Env) *Env {
-	return &Env{
+	e := &Env{
 		Parent: p,
-		Root:   p.Root,
-		sym:    make(map[string]*Type),
-		imm:    make(map[string]*Object),
-		obj:    make(map[string]*Object),
+		Sym:    make(map[string]*Type),
+		Imm:    make(map[string]*Object),
+		Obj:    make(map[string]*Object),
 	}
+
+	if p != nil {
+		e.Root = p.Root
+	}
+
+	return e
 }
 
 func (e *Env) InsertSym(name string, sym *Type) error {
-	if _, ok := e.sym[name]; ok {
+	if _, ok := e.Sym[name]; ok {
 		return fmt.Errorf("\"%s\" already defined in current environment", name)
 	}
 
-	e.sym[name] = sym
+	e.Sym[name] = sym
 
 	return nil
 }
@@ -205,7 +217,7 @@ func (e *Env) LookupSym(name string) (*Type, int) {
 	lvl := 0
 
 	for env != nil {
-		if sym, ok := env.sym[name]; ok {
+		if sym, ok := env.Sym[name]; ok {
 			return sym, lvl
 		}
 
@@ -217,23 +229,24 @@ func (e *Env) LookupSym(name string) (*Type, int) {
 }
 
 func (e *Env) InsertImm(lit string, imm *Object) {
-	if _, ok := e.Root.imm[lit]; ok {
+	if _, ok := e.Root.Imm[lit]; ok {
 		return
 	}
 
-	e.Root.imm[lit] = imm
+	e.Root.Imm[lit] = imm
+	e.Root.ImmSz += imm.Size()
 }
 
 func (e *Env) LookupImm(lit string) *Object {
-	return e.Root.imm[lit]
+	return e.Root.Imm[lit]
 }
 
 func (e *Env) InsertObj(name string, obj *Object) error {
-	if _, ok := e.obj[name]; ok {
+	if _, ok := e.Obj[name]; ok {
 		return fmt.Errorf("\"%s\" already defined in current environment", name)
 	}
 
-	e.obj[name] = obj
+	e.Obj[name] = obj
 
 	return nil
 }
@@ -243,7 +256,7 @@ func (e *Env) LookupObj(name string) (*Object, int) {
 	lvl := 0
 
 	for env != nil {
-		if obj, ok := env.obj[name]; ok {
+		if obj, ok := env.Obj[name]; ok {
 			return obj, lvl
 		}
 
