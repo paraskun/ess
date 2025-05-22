@@ -1,6 +1,9 @@
 package run
 
 import (
+	"encoding/binary"
+	"fmt"
+	"io"
 	"math"
 	"unsafe"
 )
@@ -100,11 +103,8 @@ func (m *Machine) Exec() {
 			m.su32(m.nu32())
 		case PUSHD:
 			m.su64(m.nu64())
-		case ADDRI:
+		case LEAII:
 			ptr := unsafe.Add(m.bp, m.nu32())
-			m.su64(uint64(*(*uintptr)(ptr)))
-		case ADDRS:
-			ptr := unsafe.Add(m.bp, m.lu32())
 			m.su64(uint64(*(*uintptr)(ptr)))
 		case LBII:
 			ptr := unsafe.Add(m.bp, m.nu32())
@@ -535,4 +535,58 @@ func (m *Machine) su64(v uint64) {
 func (m *Machine) sf64(v float64) {
 	*(*float64)(m.sp) = v
 	m.sp = unsafe.Add(m.sp, 8)
+}
+
+func (p *Pragma) Debug(w io.Writer) {
+	for _, img := range p.Img {
+		img.Debug(w)
+	}
+}
+
+func (img *FuncImage) Debug(w io.Writer) {
+	fmt.Fprintf(w, ".func\n")
+	fmt.Fprintf(w, "\tdat: %d\n", img.DatSz)
+	fmt.Fprintf(w, "\targ: %d\n", img.ArgSz)
+	fmt.Fprintf(w, ".text\n")
+
+	src := img.Src
+
+	for i := 0; len(src) > 0; i++ {
+		fmt.Fprintf(w, "\t%-4d ", i)
+
+		switch Code(src[0]) {
+		case PUSHB:
+			fmt.Fprintf(w, "%s %d\n", Code(src[0]).String(), src[1])
+			src = src[2:]
+		case PUSHD:
+			fmt.Fprintf(w, "%s %d\n", Code(src[0]).String(), binary.LittleEndian.Uint64(src[1:]))
+			src = src[9:]
+		case LAIS, SAIS, LASI, SASI, LAI, LBII, LWII, LDII, SBII, SWII, SDII, LEAII:
+			fmt.Fprintf(w, "%s %d %d\n", Code(src[0]).String(),
+				binary.LittleEndian.Uint32(src[1:]),
+				binary.LittleEndian.Uint32(src[5:]),
+			)
+			src = src[9:]
+		case LAII, SAII:
+			fmt.Fprintf(w, "%s %d %d %d\n", Code(src[0]).String(),
+				binary.LittleEndian.Uint32(src[1:]),
+				binary.LittleEndian.Uint32(src[5:]),
+				binary.LittleEndian.Uint32(src[9:]),
+			)
+			src = src[13:]
+		case JMP, JIF, CALL, LASS, SASS, PUSHW,
+			LBIS, LWIS, LDIS, SBIS, SWIS, SDIS, LBSI, LWSI, LDSI, SBSI, SWSI, SDSI, LBI, LWI, LDI:
+			fmt.Fprintf(w, "%s %d\n", Code(src[0]).String(), binary.LittleEndian.Uint32(src[1:]))
+			src = src[5:]
+		case RET, LBSS, LWSS, LDSS, SBSS, SWSS, SDSS,
+			ADDI, SUBI, MULI, DIVI, POWI, SHLI, SHRI, MODI, XORI, ANDI, ORI, BNEGI, UNEGI, LTI, LEI, EQI, NEI,
+			ADDU, SUBU, MULU, DIVU, POWU, SHLU, SHRU, MODU, XORU, ANDU, ORU, BNEGU, UNEGU, LTU, LEU, EQU, NEU,
+			ADDF, SUBF, MULF, DIVF, POWF, UNEGF, LTF, LEF, EQF, NEF,
+			ANDL, ORL, NEGL, I2U, I2F, U2I, U2F, F2I, F2U:
+			fmt.Fprintf(w, "%s\n", Code(src[0]).String())
+			src = src[1:]
+		default:
+			panic(fmt.Errorf("unkown opcode: %d", src[0]))
+		}
+	}
 }

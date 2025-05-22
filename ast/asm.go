@@ -30,13 +30,16 @@ type assembler struct {
 func (asm *assembler) VisitDecl(u Decl) {
 	switch dec := u.(type) {
 	case *FuncDecl:
-		img := run.FuncImage{}
 		src := &bytes.Buffer{}
+		img := run.FuncImage{
+			DatSz: 8,
+		}
 
 		asm.img = &img
+		asm.src = src
 
 		for _, arg := range dec.Spec.Arg {
-			argSz := arg.Obj.Typ.Size()
+			argSz := arg.Obj.Size()
 
 			arg.Obj.Off = img.DatSz
 			img.DatSz += argSz
@@ -55,7 +58,6 @@ func (asm *assembler) VisitDecl(u Decl) {
 
 		dec.Body.Accept(asm)
 
-		img.DatSz += 8
 		img.Imm = buf.Bytes()
 		img.Src = src.Bytes()
 
@@ -96,6 +98,17 @@ func (asm *assembler) VisitStmt(u Stmt) {
 	case *LoopStmt:
 	case *CondStmt:
 	case *ReturnStmt:
+		if s.Ret.Type().Kind == typ.COMP {
+			b, o := asm.getPosition(s.Ret)
+
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LEAII))
+			binary.Write(asm.src, binary.LittleEndian, uint32(b))
+			binary.Write(asm.src, binary.LittleEndian, uint32(o))
+		} else {
+			s.Ret.Accept(asm)
+		}
+
+		binary.Write(asm.src, binary.LittleEndian, byte(run.RET))
 	}
 }
 
@@ -195,7 +208,15 @@ func (asm *assembler) VisitExpr(u Expr) {
 		}
 	case *CallExpr:
 		for _, arg := range exp.Arg {
-			arg.Accept(asm)
+			if arg.Type().Kind == typ.COMP {
+				b, o := asm.getPosition(arg)
+
+				binary.Write(asm.src, binary.LittleEndian, byte(run.LEAII))
+				binary.Write(asm.src, binary.LittleEndian, uint32(b))
+				binary.Write(asm.src, binary.LittleEndian, uint32(o))
+			} else {
+				arg.Accept(asm)
+			}
 		}
 
 		idx := len(asm.img.Call)
@@ -233,13 +254,26 @@ func (asm *assembler) VisitExpr(u Expr) {
 	}
 }
 
-func (asm *assembler) getPosition(u Expr) (int, int) {
+func (asm *assembler) getPosition(u Expr) (b int, o int) {
 	switch exp := u.(type) {
 	case *IdfExpr:
-		_ = exp
+		if exp.Obj.Off == -1 {
+			exp.Obj.Off = asm.img.DatSz
+			asm.img.DatSz += exp.Obj.Size()
+		}
+
+		if exp.Obj.Ref {
+			b = exp.Obj.Off
+			o = 0
+		} else {
+			b = 0
+			o = exp.Obj.Off
+		}
 	case *DotExpr:
-		_ = exp
+		inf := exp.Comp.Type().Info.(*typ.CompInfo)
+		b, o = asm.getPosition(exp.Comp)
+		o += inf.Fields[exp.Field.Lit].Off
 	}
 
-	return 0, 0
+	return b, o
 }

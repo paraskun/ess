@@ -487,7 +487,9 @@ func (p *parser) parseFuncSpec() *FuncSpec {
 
 	if p.peek().TokenType == lex.LP {
 		p.next()
-		s.Ret = p.parseFieldSpec()
+		s.Ret = &FieldSpec{
+			Typ: p.parseTypeSpec(),
+		}
 		p.expect(lex.RP)
 	}
 
@@ -670,43 +672,15 @@ func (p *parser) parseExpr6() Expr {
 }
 
 func (p *parser) parseExpr7() Expr {
-	cur := p.parseExpr8()
+	switch p.peek().TokenType {
+	case lex.IDF:
+		tok := p.next()
 
-	if p.peek().TokenType == lex.LP {
-		switch p.prv.TokenType {
-		case lex.I64:
+		switch p.peek().TokenType {
+		case lex.LP:
 			p.next()
 
-			cur = &ToSigExpr{
-				Tok: p.prv,
-				X:   p.parseExpr0(),
-			}
-
-			p.expect(lex.RP)
-		case lex.U64:
-			p.next()
-
-			cur = &ToUnsExpr{
-				Tok: p.prv,
-				X:   p.parseExpr0(),
-			}
-
-			p.expect(lex.RP)
-		case lex.F64:
-			p.next()
-
-			cur = &ToFltExpr{
-				Tok: p.prv,
-				X:   p.parseExpr0(),
-			}
-
-			p.expect(lex.RP)
-		case lex.IDF:
-			p.next()
-
-			exe := &CallExpr{
-				Tok: p.prv,
-			}
+			exe := &CallExpr{Tok: tok}
 
 			for p.peek().TokenType != lex.RP {
 				exe.Arg = append(exe.Arg, p.parseExpr0())
@@ -718,24 +692,11 @@ func (p *parser) parseExpr7() Expr {
 
 			p.expect(lex.RP)
 
-			cur = exe
-		default:
-			p.error(fmt.Errorf("could not call non-executable"))
-		}
-	}
+			return exe
+		case lex.LB:
+			p.next()
 
-	return cur
-}
-
-func (p *parser) parseExpr8() Expr {
-	switch p.peek().TokenType {
-	case lex.IDF:
-		par := p.next()
-
-		if p.peek().TokenType == lex.LB {
-			exp := &CompImmExpr{
-				Tok: par,
-			}
+			exp := &CompImmExpr{Tok: tok}
 
 			for p.peek().TokenType != lex.RB {
 				tok := p.next()
@@ -752,12 +713,38 @@ func (p *parser) parseExpr8() Expr {
 				}
 			}
 
+			p.expect(lex.RB)
+
 			return exp
 		}
 
-		return &IdfExpr{Tok: par}
+		return &IdfExpr{Tok: tok}
 	case lex.II64, lex.IU64, lex.IF64, lex.TRUE, lex.FALSE:
 		return &BaseImmExpr{Tok: p.next()}
+	case lex.I64:
+		exp := &ToSigExpr{Tok: p.next()}
+
+		p.expect(lex.LP)
+		exp.X = p.parseExpr0()
+		p.expect(lex.RP)
+
+		return exp
+	case lex.U64:
+		exp := &ToUnsExpr{Tok: p.next()}
+
+		p.expect(lex.LP)
+		exp.X = p.parseExpr0()
+		p.expect(lex.RP)
+
+		return exp
+	case lex.F64:
+		exp := &ToFltExpr{Tok: p.next()}
+
+		p.expect(lex.LP)
+		exp.X = p.parseExpr0()
+		p.expect(lex.RP)
+
+		return exp
 	case lex.LP:
 		p.next()
 		r := p.parseExpr0()
@@ -766,7 +753,7 @@ func (p *parser) parseExpr8() Expr {
 		return r
 	}
 
-	p.error(fmt.Errorf("value expected"))
+	p.error(fmt.Errorf("malformed expression"))
 
 	return nil
 }

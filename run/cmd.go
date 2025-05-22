@@ -23,10 +23,9 @@ const (
 	PUSHW = PUSH | 0b00100000 // pushw <val:4>
 	PUSHD = PUSH | 0b01000000 // pushd <val:8>
 
-	ADDR = 0x04
+	LEA = 0x04
 
-	ADDRI = ADDR            // addri <idx:4>
-	ADDRS = ADDR | (1 << 5) // addrs
+	LEAII = LEA // leai <idx:4> <off:4>
 
 	LB = 0x05
 	LW = 0x06
@@ -179,3 +178,43 @@ const (
 	ORL  = OR | typ.BOOL
 	NEGL = BNEG | typ.BOOL
 )
+
+var dbg = map[Code]string{
+	JMP:  "jmp",
+	JIF:  "jif",
+	CALL: "call",
+	RET:  "ret",
+	PUSH: "push",
+	LEA:  "lea",
+	LB:   "lb",
+	LW:   "lw",
+	LD:   "ld",
+	LA:   "la",
+	SB:   "sb",
+	SW:   "sw",
+	SD:   "sd",
+	SA:   "sa",
+	I2U:  "cnv",
+	F2U:  "f2u",
+	ADD:  "add",
+	SUB:  "sub",
+	MUL:  "mul",
+	DIV:  "div",
+	POW:  "pow",
+	SHL:  "shl",
+	SHR:  "shr",
+	MOD:  "mod",
+	XOR:  "xor",
+	AND:  "and",
+	OR:   "or",
+	BNEG: "bneg",
+	UNEG: "uneg",
+	LT:   "lt",
+	LE:   "le",
+	EQ:   "eq",
+	NE:   "ne",
+}
+
+func (c Code) String() string {
+	return dbg[c&0b00011111]
+}

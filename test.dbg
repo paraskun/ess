@@ -1,0 +1,15 @@
+.func
+	dat: 40
+	arg: 8
+.text
+	0    ld 0
+	1    sd 0 16
+	2    ld 8
+	3    sd 0 24
+	4    ld 0 24
+	5    cnv
+	6    ld 0 16
+	7    add
+	8    sd 0 32
+	9    lea 8 16
+	10   ret

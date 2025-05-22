@@ -1,0 +1,17 @@
+type inner {
+  c u64
+}
+
+type message {
+  a i64
+  b f64
+  i inner
+}
+
+func main(m message) (inner) {
+  var a = 10;
+  var b = 10u;
+  var c = a + i64(b);
+
+  return m.i;
+}

@@ -70,15 +70,15 @@ func (t *typer) visitCompDecl(d *CompDecl) {
 func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
 	switch s := u.(type) {
 	case *BaseSpec:
-		t.visitBaseSpec(s, env)
+		t.visitBaseSpec(s)
 	case *FuncSpec:
 		t.visitFuncSpec(s, env)
 	case *CompSpec:
-		t.visitCompSpec(s, env)
+		t.visitCompSpec(s)
 	}
 }
 
-func (t *typer) visitBaseSpec(s *BaseSpec, env bool) {
+func (t *typer) visitBaseSpec(s *BaseSpec) {
 	switch s.Tok.TokenType {
 	case lex.BOOL:
 		s.Typ = &typ.BoolType
@@ -164,7 +164,7 @@ func (t *typer) visitFuncSpec(s *FuncSpec, env bool) {
 	}
 }
 
-func (t *typer) visitCompSpec(s *CompSpec, env bool) {
+func (t *typer) visitCompSpec(s *CompSpec) {
 	inf := typ.CompInfo{Fields: make(map[string]typ.Field)}
 	off := 0
 
@@ -227,12 +227,13 @@ func (t *typer) visitAssignStmt(a *AssignStmt) {
 
 	if a.Dec {
 		idf := a.Var.(*IdfExpr)
-
-		if err := t.curEnv.InsertObj(idf.Tok.Lit, &typ.Object{
+		idf.Obj = &typ.Object{
 			Typ: a.Val.Type(),
 			Off: -1,
 			Loc: true,
-		}); err != nil {
+		}
+
+		if err := t.curEnv.InsertObj(idf.Tok.Lit, idf.Obj); err != nil {
 			panic(err)
 		}
 
@@ -424,7 +425,7 @@ func (t *typer) visitCompImmExpr(e *CompImmExpr) {
 			panic("unknown field")
 		}
 
-		if fld.Off > off {
+		if fld.Off < off {
 			panic("immediate compounds must be ordered")
 		}
 
@@ -436,4 +437,6 @@ func (t *typer) visitCompImmExpr(e *CompImmExpr) {
 
 		off = fld.Off
 	}
+
+	e.Typ = sym
 }
