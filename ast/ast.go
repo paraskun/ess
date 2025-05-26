@@ -53,6 +53,10 @@ type (
 		Neg *BlockStmt
 	}
 
+	CallStmt struct {
+		Exp *CallExpr
+	}
+
 	ReturnStmt struct {
 		Tok *lex.Token
 		Ret Expr
@@ -64,12 +68,14 @@ func (s *AssignStmt) Accept(v Visitor) { v.VisitStmt(s) }
 func (s *BlockStmt) Accept(v Visitor)  { v.VisitStmt(s) }
 func (s *LoopStmt) Accept(v Visitor)   { v.VisitStmt(s) }
 func (s *CondStmt) Accept(v Visitor)   { v.VisitStmt(s) }
+func (s *CallStmt) Accept(v Visitor)   { v.VisitStmt(s) }
 
 func (*ReturnStmt) stmt() {}
 func (*AssignStmt) stmt() {}
 func (*BlockStmt) stmt()  {}
 func (*LoopStmt) stmt()   {}
 func (*CondStmt) stmt()   {}
+func (*CallStmt) stmt()   {}
 
 // Expressions
 
@@ -130,7 +136,7 @@ type (
 	CallExpr struct {
 		Tok *lex.Token
 		Typ *typ.Type
-		Obj *typ.Object
+		Sym *typ.Type
 		Arg []Expr
 	}
 
@@ -349,8 +355,33 @@ func (p *parser) parseStmt() Stmt {
 	switch p.peek().TokenType {
 	case lex.RET:
 		return p.parseReturnStmt()
-	case lex.VAR, lex.IDF:
+	case lex.VAR:
 		return p.parseAssignStmt()
+	case lex.IDF:
+		exp := p.parseExpr6()
+
+		if p.peek().TokenType == lex.EQ {
+			res := &AssignStmt{
+				Tok: p.next(),
+				Var: exp,
+				Val: p.parseExpr0(),
+			}
+
+			p.expect(lex.SEM)
+
+			return res
+		}
+
+		p.expect(lex.SEM)
+
+		if call, ok := exp.(*CallExpr); !ok {
+			p.error(fmt.Errorf("statement expected"))
+			return nil
+		} else {
+			return &CallStmt{
+				Exp: call,
+			}
+		}
 	case lex.FOR:
 		return p.parseLoopStmt()
 	case lex.IF:
@@ -392,21 +423,16 @@ func (p *parser) parseReturnStmt() *ReturnStmt {
 }
 
 func (p *parser) parseAssignStmt() *AssignStmt {
-	r := AssignStmt{}
+	p.next()
 
-	if p.peek().TokenType == lex.VAR {
-		p.next()
-
-		r.Dec = true
-		r.Var = &IdfExpr{
+	r := AssignStmt{
+		Dec: true,
+		Var: &IdfExpr{
 			Tok: p.expect(lex.IDF),
-		}
-	} else {
-		r.Var = p.parseExpr6()
+		},
+		Tok: p.expect(lex.EQ),
+		Val: p.parseExpr0(),
 	}
-
-	r.Tok = p.expect(lex.EQ)
-	r.Val = p.parseExpr0()
 
 	p.expect(lex.SEM)
 
@@ -418,10 +444,7 @@ func (p *parser) parseLoopStmt() *LoopStmt {
 		Tok: p.expect(lex.FOR),
 	}
 
-	p.expect(lex.LP)
 	r.Con = p.parseExpr0()
-	p.expect(lex.RP)
-
 	r.Rep = p.parseBlockStmt()
 
 	return &r
@@ -432,10 +455,7 @@ func (p *parser) parseCondStmt() *CondStmt {
 		Tok: p.expect(lex.IF),
 	}
 
-	p.expect(lex.LP)
 	r.Con = p.parseExpr0()
-	p.expect(lex.RP)
-
 	r.Pos = p.parseBlockStmt()
 
 	if p.peek().TokenType == lex.ELSE {

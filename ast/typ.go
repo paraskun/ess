@@ -16,6 +16,8 @@ type typer struct {
 func Typeset(p *Pragma) {
 	p.Env = typ.NewEnv(nil)
 
+	p.Env.InsertSym("log", &typ.LogType)
+
 	t := typer{
 		curEnv: p.Env,
 	}
@@ -42,17 +44,14 @@ func (t *typer) visitFuncDecl(d *FuncDecl) {
 	t.visitTypeSpec(d.Spec, true)
 
 	t.curInf = d.Spec.Type().Info.(*typ.FuncInfo)
+	t.curInf.Off = t.funNum
 
 	d.Body.Accept(t)
 
 	t.curInf = nil
 	t.curEnv = d.Env.Parent
 
-	if err := t.curEnv.InsertObj(d.Tok.Lit, &typ.Object{
-		Typ: d.Spec.Type(),
-		Off: t.funNum,
-		Loc: false,
-	}); err != nil {
+	if err := t.curEnv.InsertSym(d.Tok.Lit, d.Spec.Type()); err != nil {
 		panic(err)
 	}
 
@@ -114,7 +113,6 @@ func (t *typer) visitFuncSpec(s *FuncSpec, env bool) {
 			arg.Obj = &typ.Object{
 				Typ: arg.Typ.Type(),
 				Off: -1,
-				Loc: true,
 			}
 
 			if arg.Typ.Type().Kind == typ.COMP {
@@ -147,7 +145,6 @@ func (t *typer) visitFuncSpec(s *FuncSpec, env bool) {
 			if err := t.curEnv.InsertObj(s.Ret.Tok.Lit, &typ.Object{
 				Typ: s.Ret.Typ.Type(),
 				Off: -1,
-				Loc: true,
 			}); err != nil {
 				panic(err)
 			}
@@ -165,7 +162,7 @@ func (t *typer) visitFuncSpec(s *FuncSpec, env bool) {
 }
 
 func (t *typer) visitCompSpec(s *CompSpec) {
-	inf := typ.CompInfo{Fields: make(map[string]typ.Field)}
+	inf := typ.CompInfo{Fields: make(map[string]*typ.Field)}
 	off := 0
 
 	for _, fld := range s.Fields {
@@ -179,7 +176,7 @@ func (t *typer) visitCompSpec(s *CompSpec) {
 			panic("duplicated field")
 		}
 
-		inf.Fields[fld.Tok.Lit] = typ.Field{
+		inf.Fields[fld.Tok.Lit] = &typ.Field{
 			Name: fld.Tok.Lit,
 			Typ:  fld.Typ.Type(),
 			Off:  off,
@@ -219,6 +216,12 @@ func (t *typer) VisitStmt(u Stmt) {
 		if s.Neg != nil {
 			s.Neg.Accept(t)
 		}
+	case *CallStmt:
+		s.Exp.Accept(t)
+
+		if s.Exp.Type() != nil {
+			panic("missed return")
+		}
 	}
 }
 
@@ -230,7 +233,6 @@ func (t *typer) visitAssignStmt(a *AssignStmt) {
 		idf.Obj = &typ.Object{
 			Typ: a.Val.Type(),
 			Off: -1,
-			Loc: true,
 		}
 
 		if err := t.curEnv.InsertObj(idf.Tok.Lit, idf.Obj); err != nil {
@@ -319,32 +321,36 @@ func (t *typer) VisitExpr(u Expr) {
 
 		e.Typ = e.X.Type()
 	case *CallExpr:
-		obj, _ := t.curEnv.LookupObj(e.Tok.Lit)
+		sym, _ := t.curEnv.LookupSym(e.Tok.Lit)
 
-		if obj == nil {
+		if sym == nil || sym.Kind != typ.FUNC {
 			panic("undeclared function")
 		}
 
-		e.Obj = obj
+		e.Sym = sym
 
 		for _, arg := range e.Arg {
 			arg.Accept(t)
 		}
 
-		inf := obj.Typ.Info.(*typ.FuncInfo)
+		inf := sym.Info.(*typ.FuncInfo)
 
 		if len(inf.Arg) != len(e.Arg) {
 			panic("function argument disbalance")
 		}
 
 		for i := range inf.Arg {
+			if inf.Arg[i].Typ.Kind == typ.ANY {
+				continue
+			}
+
 			if !inf.Arg[i].Typ.Equal(e.Arg[i].Type()) {
 				panic("type mismatch")
 			}
 		}
 
 		if inf.Ret == nil {
-			e.Typ = &typ.VoidType
+			e.Typ = nil
 		} else {
 			e.Typ = inf.Ret.Typ
 		}
@@ -352,7 +358,7 @@ func (t *typer) VisitExpr(u Expr) {
 		e.X.Accept(t)
 
 		switch e.X.Type().Kind {
-		case typ.VOID, typ.FUNC, typ.COMP, typ.BOOL:
+		case typ.FUNC, typ.COMP, typ.BOOL:
 			panic("unsupported operand type")
 		}
 
@@ -361,7 +367,7 @@ func (t *typer) VisitExpr(u Expr) {
 		e.X.Accept(t)
 
 		switch e.X.Type().Kind {
-		case typ.VOID, typ.FUNC, typ.COMP, typ.BOOL:
+		case typ.FUNC, typ.COMP, typ.BOOL:
 			panic("unsupported operand type")
 		}
 
@@ -371,7 +377,7 @@ func (t *typer) VisitExpr(u Expr) {
 		e.X.Accept(t)
 
 		switch e.X.Type().Kind {
-		case typ.VOID, typ.FUNC, typ.COMP, typ.BOOL:
+		case typ.FUNC, typ.COMP, typ.BOOL:
 			panic("unsupported operand type")
 		}
 
@@ -387,7 +393,6 @@ func (t *typer) visitBaseImmExpr(e *BaseImmExpr) {
 
 	e.Obj = &typ.Object{
 		Off: -1,
-		Loc: true,
 	}
 
 	switch e.Tok.TokenType {

@@ -3,6 +3,7 @@ package ast
 import (
 	"bytes"
 	"encoding/binary"
+	"slices"
 
 	"github.com/paraskun/ess-go/lex"
 	"github.com/paraskun/ess-go/run"
@@ -56,7 +57,15 @@ func (asm *assembler) VisitDecl(u Decl) {
 			binary.Write(buf, binary.LittleEndian, obj.Val)
 		}
 
+		if img.ArgSz != 0 {
+			binary.Write(asm.src, binary.LittleEndian, byte(run.SAII))
+			binary.Write(asm.src, binary.LittleEndian, uint32(0))
+			binary.Write(asm.src, binary.LittleEndian, uint32(8))
+			binary.Write(asm.src, binary.LittleEndian, uint32(img.ArgSz))
+		}
+
 		dec.Body.Accept(asm)
+		binary.Write(asm.src, binary.LittleEndian, byte(run.RET))
 
 		img.Imm = buf.Bytes()
 		img.Src = src.Bytes()
@@ -96,7 +105,48 @@ func (asm *assembler) VisitStmt(u Stmt) {
 			binary.Write(asm.src, binary.LittleEndian, uint32(s.Var.Type().Size()))
 		}
 	case *LoopStmt:
+		cur := asm.src.Len()
+
+		s.Con.Accept(asm)
+
+		con := asm.src.Len() - cur
+		src := asm.src
+		asm.src = &bytes.Buffer{}
+
+		s.Rep.Accept(asm)
+
+		binary.Write(src, binary.LittleEndian, byte(run.JIF))
+		binary.Write(src, binary.LittleEndian, int32(asm.src.Len())+5)
+		binary.Write(src, binary.LittleEndian, asm.src.Bytes())
+		binary.Write(src, binary.LittleEndian, byte(run.JMP))
+		binary.Write(src, binary.LittleEndian, int32(-asm.src.Len()-con-10))
+
+		asm.src = src
 	case *CondStmt:
+		s.Con.Accept(asm)
+
+		src := asm.src
+		asm.src = &bytes.Buffer{}
+
+		s.Pos.Accept(asm)
+
+		binary.Write(src, binary.LittleEndian, byte(run.JIF))
+		binary.Write(src, binary.LittleEndian, int32(asm.src.Len()+5))
+		binary.Write(src, binary.LittleEndian, asm.src.Bytes())
+
+		asm.src.Reset()
+
+		if s.Neg != nil {
+			s.Neg.Accept(asm)
+		}
+
+		binary.Write(src, binary.LittleEndian, byte(run.JMP))
+		binary.Write(src, binary.LittleEndian, int32(asm.src.Len()))
+		binary.Write(src, binary.LittleEndian, asm.src.Bytes())
+
+		asm.src = src
+	case *CallStmt:
+		s.Exp.Accept(asm)
 	case *ReturnStmt:
 		if s.Ret.Type().Kind == typ.COMP {
 			b, o := asm.getPosition(s.Ret)
@@ -107,8 +157,6 @@ func (asm *assembler) VisitStmt(u Stmt) {
 		} else {
 			s.Ret.Accept(asm)
 		}
-
-		binary.Write(asm.src, binary.LittleEndian, byte(run.RET))
 	}
 }
 
@@ -177,10 +225,10 @@ func (asm *assembler) VisitExpr(u Expr) {
 		case lex.LE:
 			cmd = byte(run.LE | exp.X.Type().Kind)
 		case lex.GT:
-			cmd = byte(run.LE | exp.X.Type().Kind)
+			cmd = byte(run.LT | exp.X.Type().Kind)
 			rev = true
 		case lex.GE:
-			cmd = byte(run.LT | exp.X.Type().Kind)
+			cmd = byte(run.LE | exp.X.Type().Kind)
 			rev = true
 		case lex.EEQ:
 			cmd = byte(run.EQ | exp.X.Type().Kind)
@@ -207,7 +255,13 @@ func (asm *assembler) VisitExpr(u Expr) {
 			asm.src.WriteByte(byte(run.UNEG) | byte(exp.X.Type().Kind))
 		}
 	case *CallExpr:
-		for _, arg := range exp.Arg {
+		inf := exp.Sym.Info.(*typ.FuncInfo)
+
+		for i, arg := range exp.Arg {
+			if inf.Arg[i].Typ.Kind == typ.ANY {
+				asm.pushMeta(arg)
+			}
+
 			if arg.Type().Kind == typ.COMP {
 				b, o := asm.getPosition(arg)
 
@@ -220,10 +274,10 @@ func (asm *assembler) VisitExpr(u Expr) {
 		}
 
 		idx := len(asm.img.Call)
-		asm.img.Call = append(asm.img.Call, exp.Obj.Off)
+		asm.img.Call = append(asm.img.Call, inf.Off)
 
 		binary.Write(asm.src, binary.LittleEndian, byte(run.CALL))
-		binary.Write(asm.src, binary.LittleEndian, uint32(idx))
+		binary.Write(asm.src, binary.LittleEndian, int32(idx))
 	case *ToSigExpr:
 		exp.X.Accept(asm)
 
@@ -276,4 +330,48 @@ func (asm *assembler) getPosition(u Expr) (b int, o int) {
 	}
 
 	return b, o
+}
+
+func (asm *assembler) pushMeta(u Expr) {
+	ref := false
+
+	switch e := u.(type) {
+	case *IdfExpr, *DotExpr:
+		if e.Type().Kind == typ.COMP {
+			ref = true
+		}
+	}
+
+	asm.pushType(u.Type(), ref)
+}
+
+func (asm *assembler) pushType(t *typ.Type, ref bool) {
+	kind := byte(t.Kind)
+
+	if ref {
+		kind |= 1 << 4
+	}
+
+	binary.Write(asm.src, binary.LittleEndian, byte(run.PUSHB))
+	binary.Write(asm.src, binary.LittleEndian, byte(kind))
+
+	if t.Kind == typ.COMP {
+		fm := t.Info.(*typ.CompInfo).Fields
+		fs := make([]*typ.Field, len(fm))
+
+		for _, f := range fm {
+			fs = append(fs, f)
+		}
+
+		slices.SortFunc(fs, func(a, b *typ.Field) int {
+			return a.Off - b.Off
+		})
+
+		binary.Write(asm.src, binary.LittleEndian, byte(run.PUSHB))
+		binary.Write(asm.src, binary.LittleEndian, byte(len(t.Info.(*typ.CompInfo).Fields)))
+
+		for _, f := range fs {
+			asm.pushType(f.Typ, false)
+		}
+	}
 }

@@ -12,7 +12,13 @@ func main() {
 	p := ast.Parse([]rune(string(b)))
 
 	ast.Typeset(p)
-	ast.Assemble(p).Debug(o)
+
+	e := ast.Assemble(p)
+	// m := run.Machine{}
+
+	e.Debug(o)
+	// m.Load(e)
+	// m.Exec()
 
 	o.Close()
 }

@@ -5,13 +5,14 @@ import "fmt"
 type Kind byte
 
 const (
-	VOID Kind = 0b00000000
+	ANY  Kind = 0b00000000
 	FUNC      = 0b00100000
 	COMP      = 0b01000000
 	BOOL      = 0b01100000
 	I64       = 0b10000000
 	U64       = 0b10100000
 	F64       = 0b11000000
+	STR       = 0b11100000
 )
 
 type (
@@ -28,7 +29,7 @@ type (
 	Field struct {
 		Name string // maybe empty
 
-		// Typ specifies fields type.
+		// Typ specifies the type.
 		Typ *Type
 
 		// Off is an offset in bytes within
@@ -39,10 +40,13 @@ type (
 	FuncInfo struct {
 		Arg []*Field
 		Ret *Field
+
+		Off int
+		Nat bool
 	}
 
 	CompInfo struct {
-		Fields map[string]Field
+		Fields map[string]*Field
 	}
 )
 
@@ -64,7 +68,15 @@ func (t *Type) Size() (r int) {
 }
 
 func (t *Type) Equal(o *Type) bool {
+	if o == nil {
+		return false
+	}
+
 	if t.Kind != o.Kind {
+		return false
+	}
+
+	if t.Kind == ANY {
 		return false
 	}
 
@@ -101,8 +113,8 @@ func (t *FuncInfo) Equal(o *FuncInfo) bool {
 }
 
 var (
-	VoidType = Type{
-		Kind: VOID,
+	AnyType = Type{
+		Kind: ANY,
 	}
 
 	BoolType = Type{
@@ -120,6 +132,21 @@ var (
 	Flt64Type = Type{
 		Kind: F64,
 	}
+
+	LogType = Type{
+		Kind: FUNC,
+		Info: &FuncInfo{
+			Arg: []*Field{
+				{
+					Typ: &AnyType,
+					Off: 0,
+				},
+			},
+			Ret: nil,
+			Nat: true,
+			Off: -1,
+		},
+	}
 )
 
 // Object is a global variable (function),
@@ -133,10 +160,6 @@ type Object struct {
 	// reference pointer.
 	Ref bool
 
-	// Loc indicates whether object
-	// is local or not (function or not).
-	Loc bool
-
 	// Val constains constant values
 	// infered at compile time.
 	//
@@ -149,9 +172,6 @@ type Object struct {
 
 	// Off contains offset in bytes inside
 	// parenting environment.
-	//
-	// For functions Off specifies its global
-	// identifier.
 	Off int
 }
 
