@@ -63,20 +63,6 @@ type (
 	}
 )
 
-func (s *ReturnStmt) Accept(v Visitor) { v.VisitStmt(s) }
-func (s *AssignStmt) Accept(v Visitor) { v.VisitStmt(s) }
-func (s *BlockStmt) Accept(v Visitor)  { v.VisitStmt(s) }
-func (s *LoopStmt) Accept(v Visitor)   { v.VisitStmt(s) }
-func (s *CondStmt) Accept(v Visitor)   { v.VisitStmt(s) }
-func (s *CallStmt) Accept(v Visitor)   { v.VisitStmt(s) }
-
-func (*ReturnStmt) stmt() {}
-func (*AssignStmt) stmt() {}
-func (*BlockStmt) stmt()  {}
-func (*LoopStmt) stmt()   {}
-func (*CondStmt) stmt()   {}
-func (*CallStmt) stmt()   {}
-
 // Expressions
 
 type (
@@ -84,7 +70,6 @@ type (
 		Node
 
 		Type() *typ.Type
-		lval() bool
 		expr()
 	}
 
@@ -162,50 +147,6 @@ type (
 	}
 )
 
-func (e *BaseImmExpr) Accept(v Visitor) { v.VisitExpr(e) }
-func (e *CompImmExpr) Accept(v Visitor) { v.VisitExpr(e) }
-func (e *IdfExpr) Accept(v Visitor)     { v.VisitExpr(e) }
-func (e *DotExpr) Accept(v Visitor)     { v.VisitExpr(e) }
-func (e *InfExpr) Accept(v Visitor)     { v.VisitExpr(e) }
-func (e *PfxExpr) Accept(v Visitor)     { v.VisitExpr(e) }
-func (e *CallExpr) Accept(v Visitor)    { v.VisitExpr(e) }
-func (e *ToSigExpr) Accept(v Visitor)   { v.VisitExpr(e) }
-func (e *ToUnsExpr) Accept(v Visitor)   { v.VisitExpr(e) }
-func (e *ToFltExpr) Accept(v Visitor)   { v.VisitExpr(e) }
-
-func (e *BaseImmExpr) Type() *typ.Type { return e.Obj.Typ }
-func (e *CompImmExpr) Type() *typ.Type { return e.Typ }
-func (e *IdfExpr) Type() *typ.Type     { return e.Obj.Typ }
-func (e *DotExpr) Type() *typ.Type     { return e.Typ }
-func (e *InfExpr) Type() *typ.Type     { return e.Typ }
-func (e *PfxExpr) Type() *typ.Type     { return e.Typ }
-func (e *CallExpr) Type() *typ.Type    { return e.Typ }
-func (e *ToSigExpr) Type() *typ.Type   { return e.Typ }
-func (e *ToUnsExpr) Type() *typ.Type   { return e.Typ }
-func (e *ToFltExpr) Type() *typ.Type   { return e.Typ }
-
-func (e *BaseImmExpr) lval() bool { return false }
-func (e *CompImmExpr) lval() bool { return false }
-func (e *IdfExpr) lval() bool     { return true }
-func (e *DotExpr) lval() bool     { return e.Comp.lval() }
-func (e *InfExpr) lval() bool     { return false }
-func (e *PfxExpr) lval() bool     { return false }
-func (e *CallExpr) lval() bool    { return false }
-func (e *ToSigExpr) lval() bool   { return false }
-func (e *ToUnsExpr) lval() bool   { return false }
-func (e *ToFltExpr) lval() bool   { return false }
-
-func (*BaseImmExpr) expr() {}
-func (*CompImmExpr) expr() {}
-func (*IdfExpr) expr()     {}
-func (*DotExpr) expr()     {}
-func (*InfExpr) expr()     {}
-func (*PfxExpr) expr()     {}
-func (*CallExpr) expr()    {}
-func (*ToSigExpr) expr()   {}
-func (*ToUnsExpr) expr()   {}
-func (*ToFltExpr) expr()   {}
-
 // Type specification
 
 type (
@@ -239,14 +180,6 @@ type (
 	}
 )
 
-func (s *BaseSpec) Type() *typ.Type { return s.Typ }
-func (s *FuncSpec) Type() *typ.Type { return s.Typ }
-func (s *CompSpec) Type() *typ.Type { return s.Typ }
-
-func (*BaseSpec) spec() {}
-func (*FuncSpec) spec() {}
-func (*CompSpec) spec() {}
-
 // Declarations
 
 type (
@@ -259,7 +192,7 @@ type (
 	FuncDecl struct {
 		Tok *lex.Token
 		Env *typ.Env
-		Obj *typ.Object
+		Sym *typ.Type
 
 		Spec *FuncSpec
 		Body *BlockStmt
@@ -271,14 +204,6 @@ type (
 		Spec *CompSpec
 	}
 )
-
-func (d *FuncDecl) Accept(v Visitor) { v.VisitDecl(d) }
-func (d *CompDecl) Accept(v Visitor) { v.VisitDecl(d) }
-
-func (*FuncDecl) stmt() {}
-func (*FuncDecl) decl() {}
-func (*CompDecl) stmt() {}
-func (*CompDecl) decl() {}
 
 type Pragma struct {
 	Env *typ.Env
@@ -293,7 +218,7 @@ type parser struct {
 }
 
 func (p *parser) error(err error) {
-	panic(fmt.Errorf("parser: %d:%d: %w", p.cur.Row, p.cur.Col, err))
+	panic(fmt.Errorf("parser [%d:%d]: %w", p.cur.Row, p.cur.Col, err))
 }
 
 func (p *parser) next() *lex.Token {
@@ -351,50 +276,78 @@ func (p *parser) parseDecl() Decl {
 	return nil
 }
 
-func (p *parser) parseStmt() Stmt {
-	switch p.peek().TokenType {
-	case lex.RET:
-		return p.parseReturnStmt()
-	case lex.VAR:
-		return p.parseAssignStmt()
-	case lex.IDF:
-		exp := p.parseExpr6()
+func (p *parser) parseFuncDecl() *FuncDecl {
+	f := &FuncDecl{}
 
-		if p.peek().TokenType == lex.EQ {
-			res := &AssignStmt{
-				Tok: p.next(),
-				Var: exp,
-				Val: p.parseExpr0(),
-			}
+	p.expect(lex.FUNC)
 
-			p.expect(lex.SEM)
-
-			return res
-		}
-
-		p.expect(lex.SEM)
-
-		if call, ok := exp.(*CallExpr); !ok {
-			p.error(fmt.Errorf("statement expected"))
-			return nil
-		} else {
-			return &CallStmt{
-				Exp: call,
-			}
-		}
-	case lex.FOR:
-		return p.parseLoopStmt()
-	case lex.IF:
-		return p.parseCondStmt()
-	case lex.FUNC:
-		return p.parseFuncDecl()
-	case lex.TYPE:
-		return p.parseCompDecl()
+	f.Tok = p.expect(lex.IDF)
+	f.Spec = &FuncSpec{
+		BaseSpec: BaseSpec{
+			Tok: p.expect(lex.LP),
+		},
 	}
 
-	p.error(fmt.Errorf("statement expected"))
+	for p.peek().TokenType != lex.RP {
+		f.Spec.Arg = append(f.Spec.Arg, p.parseNamedSpec())
 
-	return nil
+		if p.peek().TokenType != lex.RP {
+			p.expect(lex.COM)
+		}
+	}
+
+	p.expect(lex.RP)
+
+	if p.peek().TokenType != lex.LB {
+		f.Spec.Ret = p.parseUnnamedSpec()
+	}
+
+	f.Body = p.parseBlockStmt()
+
+	return f
+}
+
+func (p *parser) parseCompDecl() *CompDecl {
+	c := &CompDecl{}
+
+	p.expect(lex.TYPE)
+
+	c.Tok = p.expect(lex.IDF)
+	c.Spec = &CompSpec{
+		BaseSpec: BaseSpec{
+			Tok: p.expect(lex.LB),
+		},
+	}
+
+	for p.peek().TokenType != lex.RB {
+		c.Spec.Fields = append(c.Spec.Fields, p.parseNamedSpec())
+	}
+
+	p.expect(lex.RB)
+
+	return c
+}
+
+func (p *parser) parseNamedSpec() *FieldSpec {
+	return &FieldSpec{
+		Tok: p.expect(lex.IDF),
+		Typ: p.parseTypeSpec(),
+	}
+}
+
+func (p *parser) parseUnnamedSpec() *FieldSpec {
+	return &FieldSpec{
+		Typ: p.parseTypeSpec(),
+	}
+}
+
+func (p *parser) parseTypeSpec() TypeSpec {
+	switch p.peek().TokenType {
+	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDF:
+		return &BaseSpec{Tok: p.next()}
+	}
+
+	panic("type specification expected")
 }
 
 func (p *parser) parseBlockStmt() *BlockStmt {
@@ -411,25 +364,88 @@ func (p *parser) parseBlockStmt() *BlockStmt {
 	return &r
 }
 
-func (p *parser) parseReturnStmt() *ReturnStmt {
-	r := ReturnStmt{
-		Tok: p.expect(lex.RET),
-		Ret: p.parseExpr0(),
+func (p *parser) parseStmt() Stmt {
+	switch p.peek().TokenType {
+	case lex.FUNC:
+		return p.parseFuncDecl()
+	case lex.TYPE:
+		return p.parseCompDecl()
+	case lex.IDF:
+		idf := p.next()
+
+		if p.peek().TokenType == lex.LP {
+			exe := p.parseCall(idf)
+			p.expect(lex.SEM)
+
+			return &CallStmt{exe}
+		}
+
+		var cur Expr = &IdfExpr{Tok: idf}
+
+		for {
+			switch p.peek().TokenType {
+			case lex.DOT:
+				cur = &DotExpr{
+					Tok:   p.next(),
+					Comp:  cur,
+					Field: p.expect(lex.IDF),
+				}
+
+				continue
+			}
+
+			break
+		}
+
+		r := &AssignStmt{
+			Dec: false,
+			Var: cur,
+			Tok: p.expect(lex.EQ),
+			Val: p.parseExpr0(),
+		}
+
+		p.expect(lex.SEM)
+
+		return r
+	case lex.VAR:
+		return p.parseAssignStmt()
+	case lex.FOR:
+		return p.parseLoopStmt()
+	case lex.IF:
+		return p.parseCondStmt()
+	case lex.RET:
+		return p.parseReturnStmt()
 	}
 
-	p.expect(lex.SEM)
+	p.error(fmt.Errorf("statement expected"))
 
-	return &r
+	return nil
+}
+
+func (p *parser) parseCall(tok *lex.Token) *CallExpr {
+	p.next() // (
+
+	exe := &CallExpr{Tok: tok}
+
+	for p.peek().TokenType != lex.RP {
+		exe.Arg = append(exe.Arg, p.parseExpr0())
+
+		if p.peek().TokenType != lex.RP {
+			p.expect(lex.COM)
+		}
+	}
+
+	p.expect(lex.RP)
+
+	return exe
 }
 
 func (p *parser) parseAssignStmt() *AssignStmt {
-	p.next()
+	p.next() // var
 
 	r := AssignStmt{
 		Dec: true,
-		Var: &IdfExpr{
-			Tok: p.expect(lex.IDF),
-		},
+		Var: &IdfExpr{Tok: p.expect(lex.IDF)},
 		Tok: p.expect(lex.EQ),
 		Val: p.parseExpr0(),
 	}
@@ -467,90 +483,15 @@ func (p *parser) parseCondStmt() *CondStmt {
 	return &r
 }
 
-func (p *parser) parseTypeSpec() TypeSpec {
-	switch p.peek().TokenType {
-	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDF:
-		return &BaseSpec{Tok: p.next()}
+func (p *parser) parseReturnStmt() *ReturnStmt {
+	r := ReturnStmt{
+		Tok: p.expect(lex.RET),
+		Ret: p.parseExpr0(),
 	}
 
-	panic("type specification expected")
-}
+	p.expect(lex.SEM)
 
-func (p *parser) parseFieldSpec() *FieldSpec {
-	s := &FieldSpec{}
-
-	if p.peek().TokenType == lex.IDF {
-		s.Tok = p.next()
-	}
-
-	s.Typ = p.parseTypeSpec()
-
-	return s
-}
-
-func (p *parser) parseFuncSpec() *FuncSpec {
-	s := &FuncSpec{
-		BaseSpec: BaseSpec{
-			Tok: p.expect(lex.LP),
-		},
-	}
-
-	for p.peek().TokenType != lex.RP {
-		s.Arg = append(s.Arg, p.parseFieldSpec())
-
-		if p.peek().TokenType != lex.RP {
-			p.expect(lex.COM)
-		}
-	}
-
-	p.expect(lex.RP)
-
-	if p.peek().TokenType == lex.LP {
-		p.next()
-		s.Ret = &FieldSpec{
-			Typ: p.parseTypeSpec(),
-		}
-		p.expect(lex.RP)
-	}
-
-	return s
-}
-
-func (p *parser) parseCompSpec() *CompSpec {
-	s := &CompSpec{
-		BaseSpec: BaseSpec{
-			Tok: p.expect(lex.LB),
-		},
-	}
-
-	for p.peek().TokenType != lex.RB {
-		s.Fields = append(s.Fields, p.parseFieldSpec())
-	}
-
-	p.expect(lex.RB)
-
-	return s
-}
-
-func (p *parser) parseFuncDecl() *FuncDecl {
-	f := &FuncDecl{}
-
-	p.expect(lex.FUNC)
-	f.Tok = p.expect(lex.IDF)
-	f.Spec = p.parseFuncSpec()
-	f.Body = p.parseBlockStmt()
-
-	return f
-}
-
-func (p *parser) parseCompDecl() *CompDecl {
-	c := &CompDecl{}
-
-	p.expect(lex.TYPE)
-	c.Tok = p.expect(lex.IDF)
-	c.Spec = p.parseCompSpec()
-
-	return c
+	return &r
 }
 
 func (p *parser) parseExpr0() Expr {
@@ -694,32 +635,18 @@ func (p *parser) parseExpr6() Expr {
 func (p *parser) parseExpr7() Expr {
 	switch p.peek().TokenType {
 	case lex.IDF:
-		tok := p.next()
+		idf := p.next()
 
 		switch p.peek().TokenType {
 		case lex.LP:
-			p.next()
-
-			exe := &CallExpr{Tok: tok}
-
-			for p.peek().TokenType != lex.RP {
-				exe.Arg = append(exe.Arg, p.parseExpr0())
-
-				if p.peek().TokenType != lex.RP {
-					p.expect(lex.COM)
-				}
-			}
-
-			p.expect(lex.RP)
-
-			return exe
+			return p.parseCall(idf)
 		case lex.LB:
 			p.next()
 
-			exp := &CompImmExpr{Tok: tok}
+			exp := &CompImmExpr{Tok: idf}
 
 			for p.peek().TokenType != lex.RB {
-				tok := p.next()
+				tok := p.expect(lex.IDF)
 				p.expect(lex.COL)
 				val := p.parseExpr0()
 
@@ -738,7 +665,7 @@ func (p *parser) parseExpr7() Expr {
 			return exp
 		}
 
-		return &IdfExpr{Tok: tok}
+		return &IdfExpr{Tok: idf}
 	case lex.II64, lex.IU64, lex.IF64, lex.TRUE, lex.FALSE:
 		return &BaseImmExpr{Tok: p.next()}
 	case lex.I64:
@@ -773,7 +700,70 @@ func (p *parser) parseExpr7() Expr {
 		return r
 	}
 
-	p.error(fmt.Errorf("malformed expression"))
+	p.error(fmt.Errorf("expression expected"))
 
 	return nil
 }
+
+func (s *ReturnStmt) Accept(v Visitor) { v.VisitStmt(s) }
+func (s *AssignStmt) Accept(v Visitor) { v.VisitStmt(s) }
+func (s *BlockStmt) Accept(v Visitor)  { v.VisitStmt(s) }
+func (s *LoopStmt) Accept(v Visitor)   { v.VisitStmt(s) }
+func (s *CondStmt) Accept(v Visitor)   { v.VisitStmt(s) }
+func (s *CallStmt) Accept(v Visitor)   { v.VisitStmt(s) }
+
+func (*ReturnStmt) stmt() {}
+func (*AssignStmt) stmt() {}
+func (*BlockStmt) stmt()  {}
+func (*LoopStmt) stmt()   {}
+func (*CondStmt) stmt()   {}
+func (*CallStmt) stmt()   {}
+
+func (e *BaseImmExpr) Accept(v Visitor) { v.VisitExpr(e) }
+func (e *CompImmExpr) Accept(v Visitor) { v.VisitExpr(e) }
+func (e *IdfExpr) Accept(v Visitor)     { v.VisitExpr(e) }
+func (e *DotExpr) Accept(v Visitor)     { v.VisitExpr(e) }
+func (e *InfExpr) Accept(v Visitor)     { v.VisitExpr(e) }
+func (e *PfxExpr) Accept(v Visitor)     { v.VisitExpr(e) }
+func (e *CallExpr) Accept(v Visitor)    { v.VisitExpr(e) }
+func (e *ToSigExpr) Accept(v Visitor)   { v.VisitExpr(e) }
+func (e *ToUnsExpr) Accept(v Visitor)   { v.VisitExpr(e) }
+func (e *ToFltExpr) Accept(v Visitor)   { v.VisitExpr(e) }
+
+func (e *BaseImmExpr) Type() *typ.Type { return e.Obj.Typ }
+func (e *CompImmExpr) Type() *typ.Type { return e.Typ }
+func (e *IdfExpr) Type() *typ.Type     { return e.Obj.Typ }
+func (e *DotExpr) Type() *typ.Type     { return e.Typ }
+func (e *InfExpr) Type() *typ.Type     { return e.Typ }
+func (e *PfxExpr) Type() *typ.Type     { return e.Typ }
+func (e *CallExpr) Type() *typ.Type    { return e.Typ }
+func (e *ToSigExpr) Type() *typ.Type   { return e.Typ }
+func (e *ToUnsExpr) Type() *typ.Type   { return e.Typ }
+func (e *ToFltExpr) Type() *typ.Type   { return e.Typ }
+
+func (*BaseImmExpr) expr() {}
+func (*CompImmExpr) expr() {}
+func (*IdfExpr) expr()     {}
+func (*DotExpr) expr()     {}
+func (*InfExpr) expr()     {}
+func (*PfxExpr) expr()     {}
+func (*CallExpr) expr()    {}
+func (*ToSigExpr) expr()   {}
+func (*ToUnsExpr) expr()   {}
+func (*ToFltExpr) expr()   {}
+
+func (s *BaseSpec) Type() *typ.Type { return s.Typ }
+func (s *FuncSpec) Type() *typ.Type { return s.Typ }
+func (s *CompSpec) Type() *typ.Type { return s.Typ }
+
+func (*BaseSpec) spec() {}
+func (*FuncSpec) spec() {}
+func (*CompSpec) spec() {}
+
+func (d *FuncDecl) Accept(v Visitor) { v.VisitDecl(d) }
+func (d *CompDecl) Accept(v Visitor) { v.VisitDecl(d) }
+
+func (*FuncDecl) stmt() {}
+func (*FuncDecl) decl() {}
+func (*CompDecl) stmt() {}
+func (*CompDecl) decl() {}

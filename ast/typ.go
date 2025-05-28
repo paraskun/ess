@@ -16,7 +16,7 @@ type typer struct {
 func Typeset(p *Pragma) {
 	p.Env = typ.NewEnv(nil)
 
-	p.Env.InsertSym("log", &typ.LogType)
+	p.Env.InsertFun("log", &typ.LogType)
 
 	t := typer{
 		curEnv: p.Env,
@@ -51,7 +51,7 @@ func (t *typer) visitFuncDecl(d *FuncDecl) {
 	t.curInf = nil
 	t.curEnv = d.Env.Parent
 
-	if err := t.curEnv.InsertSym(d.Tok.Lit, d.Spec.Type()); err != nil {
+	if err := t.curEnv.InsertFun(d.Tok.Lit, d.Spec.Type()); err != nil {
 		panic(err)
 	}
 
@@ -106,10 +106,6 @@ func (t *typer) visitFuncSpec(s *FuncSpec, env bool) {
 		t.visitTypeSpec(arg.Typ, false)
 
 		if env {
-			if arg.Tok == nil {
-				panic("unnamed argument")
-			}
-
 			arg.Obj = &typ.Object{
 				Typ: arg.Typ.Type(),
 				Off: -1,
@@ -166,10 +162,6 @@ func (t *typer) visitCompSpec(s *CompSpec) {
 	off := 0
 
 	for _, fld := range s.Fields {
-		if fld.Tok == nil {
-			panic("unnamed field")
-		}
-
 		t.visitTypeSpec(fld.Typ, false)
 
 		if _, ok := inf.Fields[fld.Tok.Lit]; ok {
@@ -244,10 +236,6 @@ func (t *typer) visitAssignStmt(a *AssignStmt) {
 
 	a.Var.Accept(t)
 
-	if !a.Var.lval() {
-		panic("could not assign to rvalue")
-	}
-
 	if !a.Var.Type().Equal(a.Val.Type()) {
 		panic("type mismatch")
 	}
@@ -321,9 +309,9 @@ func (t *typer) VisitExpr(u Expr) {
 
 		e.Typ = e.X.Type()
 	case *CallExpr:
-		sym, _ := t.curEnv.LookupSym(e.Tok.Lit)
+		sym, _ := t.curEnv.LookupFun(e.Tok.Lit)
 
-		if sym == nil || sym.Kind != typ.FUNC {
+		if sym == nil {
 			panic("undeclared function")
 		}
 

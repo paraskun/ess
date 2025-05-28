@@ -29,7 +29,7 @@ type (
 	Field struct {
 		Name string // maybe empty
 
-		// Typ specifies the type.
+		// Typ is a fields type.
 		Typ *Type
 
 		// Off is an offset in bytes within
@@ -149,18 +149,16 @@ var (
 	}
 )
 
-// Object is a global variable (function),
-// local variable or (local) literal.
+// Object is a local variable or literal.
 type Object struct {
-	// Typ specifies objects type.
+	// Typ is an objects type.
 	Typ *Type
 
-	// Ref indicates whether object
-	// stored directly or by
-	// reference pointer.
+	// Ref indicates whether object stored
+	// directly or by reference pointer.
 	Ref bool
 
-	// Val constains constant values
+	// Val contains constant values
 	// infered at compile time.
 	//
 	//	- COMP -> nil
@@ -187,16 +185,12 @@ func (o *Object) Size() int {
 type Env struct {
 	Parent *Env
 
-	// Root is a reference to nearest
-	// parenting environment associated
-	// with a function.
+	// Root is a reference to nearest parenting
+	// environment associated with a function.
 	Root *Env
 
 	// ImmSz indicates imm block size in bytes.
 	ImmSz int
-
-	// Sym table contains type definitions.
-	Sym map[string]*Type
 
 	// Imm table contains immediate objects
 	// (literals) used in associated function.
@@ -205,14 +199,21 @@ type Env struct {
 	// Obj table contains local variables
 	// defined in associated block.
 	Obj map[string]*Object
+
+	// Sym table contains type declarations.
+	Sym map[string]*Type
+
+	// Fun table contains function declarations.
+	Fun map[string]*Type
 }
 
 func NewEnv(p *Env) *Env {
 	e := &Env{
 		Parent: p,
-		Sym:    make(map[string]*Type),
 		Imm:    make(map[string]*Object),
 		Obj:    make(map[string]*Object),
+		Sym:    make(map[string]*Type),
+		Fun:    make(map[string]*Type),
 	}
 
 	if p != nil {
@@ -239,6 +240,32 @@ func (e *Env) LookupSym(name string) (*Type, int) {
 	for env != nil {
 		if sym, ok := env.Sym[name]; ok {
 			return sym, lvl
+		}
+
+		lvl += 1
+		env = env.Parent
+	}
+
+	return nil, lvl
+}
+
+func (e *Env) InsertFun(name string, fun *Type) error {
+	if _, ok := e.Fun[name]; ok {
+		return fmt.Errorf("\"%s\" already defined in current environment", name)
+	}
+
+	e.Fun[name] = fun
+
+	return nil
+}
+
+func (e *Env) LookupFun(name string) (*Type, int) {
+	env := e
+	lvl := 0
+
+	for env != nil {
+		if fun, ok := env.Fun[name]; ok {
+			return fun, lvl
 		}
 
 		lvl += 1

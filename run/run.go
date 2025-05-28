@@ -6,6 +6,8 @@ import (
 	"io"
 	"math"
 	"unsafe"
+
+	"github.com/paraskun/ess-go/typ"
 )
 
 type (
@@ -32,6 +34,7 @@ type (
 type Machine struct {
 	*Pragma
 
+	nat   []func()
 	stack []byte
 	frame *FuncFrame
 
@@ -44,7 +47,31 @@ type Machine struct {
 	rp []unsafe.Pointer
 }
 
+func (m *Machine) log() {
+	kind := m.lu08()
+
+	switch typ.Kind(kind & 0b11100000) {
+	case typ.COMP:
+	case typ.BOOL:
+		if m.lu08() == 0 {
+			fmt.Println("false")
+		} else {
+			fmt.Println("true")
+		}
+	case typ.I64:
+		fmt.Printf("%v\n", m.li64())
+	case typ.U64:
+		fmt.Printf("%v\n", m.lu64())
+	case typ.F64:
+		fmt.Printf("%v\n", m.lf64())
+	}
+}
+
 func (m *Machine) loadFunc(n int) *FuncFrame {
+	if n < 0 {
+		return nil
+	}
+
 	fi := &m.Pragma.Img[n]
 	ff := &FuncFrame{
 		Func: fi,
@@ -64,14 +91,16 @@ func (m *Machine) loadFunc(n int) *FuncFrame {
 func (m *Machine) Load(p *Pragma) {
 	m.Pragma = p
 
-	m.rf = []*FuncFrame{m.loadFunc(0)}
+	m.nat = []func(){m.log}
 	m.stack = make([]byte, 100)
+	m.rf = []*FuncFrame{m.loadFunc(0)}
 	m.frame = m.rf[0]
 
 	m.rip = unsafe.Pointer(&m.rf[0].Func.Src[0])
 	m.rsp = unsafe.Pointer(&m.stack[0])
 	m.rbp = unsafe.Pointer(&m.frame.Data[0])
 	m.rcp = unsafe.Pointer(&m.frame.Func.Imm[0])
+
 }
 
 func (m *Machine) Exec() {
@@ -88,7 +117,15 @@ func (m *Machine) Exec() {
 				m.rip = unsafe.Add(m.rip, off)
 			}
 		case CALL:
-			m.rf = append(m.rf, m.frame.Call[m.nu32()])
+			idx := m.nu32()
+			fun := m.frame.Func.Call[idx]
+
+			if fun < 0 {
+				m.nat[-fun-1]()
+				continue
+			}
+
+			m.rf = append(m.rf, m.frame.Call[idx])
 			m.frame = m.rf[len(m.rf)-1]
 			m.rp = append(m.rp, m.rip)
 			m.rip = unsafe.Pointer(&m.frame.Func.Src[0])

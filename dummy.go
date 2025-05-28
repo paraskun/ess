@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/paraskun/ess-go/ast"
+	"github.com/paraskun/ess-go/run"
 )
 
 func main() {
@@ -14,11 +15,11 @@ func main() {
 	ast.Typeset(p)
 
 	e := ast.Assemble(p)
-	// m := run.Machine{}
+	m := run.Machine{}
 
 	e.Debug(o)
-	// m.Load(e)
-	// m.Exec()
+	m.Load(e)
+	m.Exec()
 
 	o.Close()
 }

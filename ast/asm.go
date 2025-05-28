@@ -258,10 +258,6 @@ func (asm *assembler) VisitExpr(u Expr) {
 		inf := exp.Sym.Info.(*typ.FuncInfo)
 
 		for i, arg := range exp.Arg {
-			if inf.Arg[i].Typ.Kind == typ.ANY {
-				asm.pushMeta(arg)
-			}
-
 			if arg.Type().Kind == typ.COMP {
 				b, o := asm.getPosition(arg)
 
@@ -271,13 +267,17 @@ func (asm *assembler) VisitExpr(u Expr) {
 			} else {
 				arg.Accept(asm)
 			}
+
+			if inf.Arg[i].Typ.Kind == typ.ANY {
+				asm.pushMeta(arg)
+			}
 		}
 
 		idx := len(asm.img.Call)
 		asm.img.Call = append(asm.img.Call, inf.Off)
 
 		binary.Write(asm.src, binary.LittleEndian, byte(run.CALL))
-		binary.Write(asm.src, binary.LittleEndian, int32(idx))
+		binary.Write(asm.src, binary.LittleEndian, uint32(idx))
 	case *ToSigExpr:
 		exp.X.Accept(asm)
 
