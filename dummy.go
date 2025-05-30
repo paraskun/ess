@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"os"
 
 	"github.com/paraskun/ess-go/ast"
@@ -19,7 +20,11 @@ func main() {
 
 	e.Debug(o)
 	m.Load(e)
-	m.Exec()
+
+	for i := range 10 {
+		arg := binary.LittleEndian.AppendUint64([]byte{}, uint64(i))
+		m.Exec(arg)
+	}
 
 	o.Close()
 }

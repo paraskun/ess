@@ -38,6 +38,7 @@ type (
 		Var Expr
 		Val Expr
 		Dec bool
+		Ini bool
 	}
 
 	LoopStmt struct {
@@ -446,8 +447,16 @@ func (p *parser) parseAssignStmt() *AssignStmt {
 	r := AssignStmt{
 		Dec: true,
 		Var: &IdfExpr{Tok: p.expect(lex.IDF)},
-		Tok: p.expect(lex.EQ),
+		Tok: p.next(),
 		Val: p.parseExpr0(),
+	}
+
+	if r.Tok.TokenType != lex.EQ && r.Tok.TokenType != lex.INI {
+		p.error(fmt.Errorf("%v given, but %v expected", r.Tok.TokenType, lex.EQ))
+	}
+
+	if r.Tok.TokenType == lex.INI {
+		r.Ini = true
 	}
 
 	p.expect(lex.SEM)

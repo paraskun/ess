@@ -10,100 +10,153 @@ import (
 	"github.com/paraskun/ess-go/typ"
 )
 
+const (
+	StackSize = 1024 // stack size in bytes
+)
+
 type (
-	Pragma struct {
-		Img []FuncImage
+	// Package is a collection of related functions.
+	Package struct {
+		Img []Image
 	}
 
-	FuncImage struct {
+	// Image is an layout for function data in memory
+	// with additional meta information.
+	Image struct {
+		Name string
+
 		DatSz int
 		ArgSz int
 
-		Imm  []byte
-		Src  []byte
+		Imm []byte
+		Src []byte
+
 		Call []int
 	}
 
-	FuncFrame struct {
-		Func *FuncImage
+	// Frame is a representation of function call
+	// in memory.
+	Frame struct {
+		*Image
+
 		Data []byte
-		Call []*FuncFrame
+		Call []*Frame
 	}
 )
 
+// Virtual machine
 type Machine struct {
-	*Pragma
+	Pkg *Package
 
-	nat   []func()
-	stack []byte
-	frame *FuncFrame
+	rip unsafe.Pointer // instruction pointer
+	rsp unsafe.Pointer // stack pointer
+	rbp unsafe.Pointer // base pointer
+	rcp unsafe.Pointer // constants pointer
 
-	rip unsafe.Pointer
-	rsp unsafe.Pointer
-	rbp unsafe.Pointer
-	rcp unsafe.Pointer
+	nat []func() // native functions
+	vmd []byte   // virtual machine data
+	vms []byte   // virtual machine stack
 
-	rf []*FuncFrame
-	rp []unsafe.Pointer
+	cf *Frame           // current frame
+	sf []*Frame         // saved frames
+	sp []unsafe.Pointer // saved instruction pointers
 }
 
-func (m *Machine) log() {
-	kind := m.lu08()
+// Native functions
+
+// log is a native function intended to
+// send arbitrary type argument to given
+// channel.
+//
+// This function should be replaced by
+// environment provided one.
+func (vm *Machine) log() {
+	kind := vm.lu08()
 
 	switch typ.Kind(kind & 0b11100000) {
 	case typ.COMP:
 	case typ.BOOL:
-		if m.lu08() == 0 {
+		if vm.lu08() == 0 {
 			fmt.Println("false")
 		} else {
 			fmt.Println("true")
 		}
 	case typ.I64:
-		fmt.Printf("%v\n", m.li64())
+		fmt.Printf("%v\n", vm.li64())
 	case typ.U64:
-		fmt.Printf("%v\n", m.lu64())
+		fmt.Printf("%v\n", vm.lu64())
 	case typ.F64:
-		fmt.Printf("%v\n", m.lf64())
+		fmt.Printf("%v\n", vm.lf64())
 	}
 }
 
-func (m *Machine) loadFunc(n int) *FuncFrame {
+// loadFunc allocates new Frame for function
+// with given offset.
+func (vm *Machine) loadFunc(n int) *Frame {
 	if n < 0 {
-		return nil
+		return nil // native function
 	}
 
-	fi := &m.Pragma.Img[n]
-	ff := &FuncFrame{
-		Func: fi,
-		Data: make([]byte, fi.DatSz),
-		Call: make([]*FuncFrame, len(fi.Call)),
+	fi := &vm.Pkg.Img[n]
+	ff := &Frame{
+		Image: fi,
+		Data:  make([]byte, fi.DatSz),
+		Call:  make([]*Frame, len(fi.Call)),
 	}
 
 	*(*uintptr)(unsafe.Pointer(&ff.Data[0])) = uintptr(unsafe.Pointer(&ff.Data[0]))
+	*(*uintptr)(unsafe.Pointer(&ff.Data[8])) = uintptr(unsafe.Pointer(&vm.vmd[0]))
 
 	for i, c := range fi.Call {
-		ff.Call[i] = m.loadFunc(c)
+		ff.Call[i] = vm.loadFunc(c)
 	}
 
 	return ff
 }
 
-func (m *Machine) Load(p *Pragma) {
-	m.Pragma = p
+func (vm *Machine) Load(pkg *Package, name string) {
+	vm.Pkg = pkg
 
-	m.nat = []func(){m.log}
-	m.stack = make([]byte, 100)
-	m.rf = []*FuncFrame{m.loadFunc(0)}
+	vm.nat = []func(){vm.log}
+	vm.vmd = make([]byte, 1)
+	vm.vms = make([]byte, StackSize)
+
+	vm.sf = make([]*Frame, 1)
+	vm.sp = make([]unsafe.Pointer, 0)
+
+	for i, img := range pkg.Img {
+		if img.Name == name {
+
+		}
+	}
 	m.frame = m.rf[0]
 
-	m.rip = unsafe.Pointer(&m.rf[0].Func.Src[0])
 	m.rsp = unsafe.Pointer(&m.stack[0])
 	m.rbp = unsafe.Pointer(&m.frame.Data[0])
-	m.rcp = unsafe.Pointer(&m.frame.Func.Imm[0])
 
+	if len(m.frame.Func.Imm) > 0 {
+		m.rcp = unsafe.Pointer(&m.frame.Func.Imm[0])
+	}
 }
 
-func (m *Machine) Exec() {
+func (m *Machine) Exec(arg []byte) {
+	m.frame = m.rf[0]
+	m.rip = unsafe.Pointer(&m.rf[0].Func.Src[0])
+
+	m.data[0] = 0
+
+	if m.ini {
+		m.data[0] = 1
+		m.ini = false
+	}
+
+	num := len(arg)
+	dst := unsafe.Slice((*byte)(m.rsp), num)
+
+	copy(dst[:num], arg[:num])
+
+	m.rsp = unsafe.Add(m.rsp, num)
+
 	for {
 		cmd := Code(m.nu08())
 
@@ -132,17 +185,20 @@ func (m *Machine) Exec() {
 			m.rbp = unsafe.Pointer(&m.frame.Data[0])
 			m.rcp = unsafe.Pointer(&m.frame.Func.Imm[0])
 		case RET:
-			m.rf = m.rf[:len(m.rf)-1]
-
-			if len(m.rf) == 0 {
+			if len(m.rf) == 1 {
 				return
 			}
+
+			m.rf = m.rf[:len(m.rf)-1]
 
 			m.frame = m.rf[len(m.rf)-1]
 			m.rip = m.rp[len(m.rp)-1]
 			m.rp = m.rp[:len(m.rp)-1]
 			m.rbp = unsafe.Pointer(&m.frame.Data[0])
-			m.rcp = unsafe.Pointer(&m.frame.Func.Imm[0])
+
+			if len(m.frame.Func.Imm) > 0 {
+				m.rcp = unsafe.Pointer(&m.frame.Func.Imm[0])
+			}
 		case PUSHB:
 			m.su08(m.nu08())
 		case PUSHW:
@@ -173,8 +229,8 @@ func (m *Machine) Exec() {
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
 			num := int(m.nu32())
 
-			src := *(*[]byte)(off)
-			dst := *(*[]byte)(m.rsp)
+			src := unsafe.Slice((*byte)(off), num)
+			dst := unsafe.Slice((*byte)(m.rsp), num)
 
 			copy(dst[:num], src[:num])
 
@@ -199,8 +255,10 @@ func (m *Machine) Exec() {
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
 			num := int(m.nu32())
 
-			src := *(*[]byte)(unsafe.Add(m.rsp, -num))
-			dst := *(*[]byte)(off)
+			m.rsp = unsafe.Add(m.rsp, -num)
+
+			src := unsafe.Slice((*byte)(m.rsp), num)
+			dst := unsafe.Slice((*byte)(off), num)
 
 			copy(dst[:num], src[:num])
 		case LBIS:
@@ -223,8 +281,8 @@ func (m *Machine) Exec() {
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
 			num := int(m.nu32())
 
-			src := *(*[]byte)(off)
-			dst := *(*[]byte)(m.rsp)
+			src := unsafe.Slice((*byte)(off), num)
+			dst := unsafe.Slice((*byte)(m.rsp), num)
 
 			copy(dst[:num], src[:num])
 
@@ -249,8 +307,10 @@ func (m *Machine) Exec() {
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
 			num := int(m.nu32())
 
-			src := *(*[]byte)(unsafe.Add(m.rsp, -num))
-			dst := *(*[]byte)(off)
+			m.rsp = unsafe.Add(m.rsp, -num)
+
+			src := unsafe.Slice((*byte)(m.rsp), num)
+			dst := unsafe.Slice((*byte)(off), num)
 
 			copy(dst[:num], src[:num])
 		case LBSI:
@@ -273,8 +333,8 @@ func (m *Machine) Exec() {
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
 			num := int(m.nu32())
 
-			src := *(*[]byte)(off)
-			dst := *(*[]byte)(m.rsp)
+			src := unsafe.Slice((*byte)(off), num)
+			dst := unsafe.Slice((*byte)(m.rsp), num)
 
 			copy(dst[:num], src[:num])
 
@@ -299,8 +359,10 @@ func (m *Machine) Exec() {
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
 			num := int(m.nu32())
 
-			src := *(*[]byte)(unsafe.Add(m.rsp, -num))
-			dst := *(*[]byte)(off)
+			m.rsp = unsafe.Add(m.rsp, -num)
+
+			src := unsafe.Slice((*byte)(m.rsp), num)
+			dst := unsafe.Slice((*byte)(off), num)
 
 			copy(dst[:num], src[:num])
 		case LBSS:
@@ -323,8 +385,8 @@ func (m *Machine) Exec() {
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
 			num := int(m.nu32())
 
-			src := *(*[]byte)(off)
-			dst := *(*[]byte)(m.rsp)
+			src := unsafe.Slice((*byte)(off), num)
+			dst := unsafe.Slice((*byte)(m.rsp), num)
 
 			copy(dst[:num], src[:num])
 
@@ -349,8 +411,10 @@ func (m *Machine) Exec() {
 			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
 			num := int(m.nu32())
 
-			src := *(*[]byte)(unsafe.Add(m.rsp, -num))
-			dst := *(*[]byte)(off)
+			m.rsp = unsafe.Add(m.rsp, -num)
+
+			src := unsafe.Slice((*byte)(m.rsp), num)
+			dst := unsafe.Slice((*byte)(off), num)
 
 			copy(dst[:num], src[:num])
 		case LBI:
@@ -366,8 +430,8 @@ func (m *Machine) Exec() {
 			off := unsafe.Add(m.rcp, m.nu32())
 			num := int(m.nu32())
 
-			src := *(*[]byte)(off)
-			dst := *(*[]byte)(m.rsp)
+			src := unsafe.Slice((*byte)(off), num)
+			dst := unsafe.Slice((*byte)(m.rsp), num)
 
 			copy(dst[:num], src[:num])
 
@@ -526,6 +590,18 @@ func (m *Machine) Exec() {
 			} else {
 				m.su08(0)
 			}
+		case I2U:
+			m.su64(uint64(m.li64()))
+		case I2F:
+			m.sf64(float64(m.li64()))
+		case U2I:
+			m.si64(int64(m.lu64()))
+		case U2F:
+			m.sf64(float64(m.lu64()))
+		case F2I:
+			m.si64(int64(m.lf64()))
+		case F2U:
+			m.su64(uint64(m.lf64()))
 		}
 	}
 }

@@ -59,6 +59,11 @@ func (s *Scanner) Next() *Token {
 		t.TokenType = RSB
 	case ':':
 		t.TokenType = COL
+
+		if len(s.buf) > 1 && s.buf[1] == '=' {
+			t.TokenType = INI
+			t.Lit = string(s.buf[0:2])
+		}
 	case ';':
 		t.TokenType = SEM
 	case ',':
@@ -68,26 +73,19 @@ func (s *Scanner) Next() *Token {
 	case '+':
 		t.TokenType = ADD
 	case '-':
+		t.TokenType = UNEG
+
 		switch s.prv.TokenType {
 		case IDF, II64:
 			t.TokenType = SUB
-		default:
-			t.TokenType = UNEG
 		}
-
-		break
 	case '*':
 		t.TokenType = MUL
 
-		if len(s.buf) > 1 {
-			switch s.buf[1] {
-			case '*':
-				t.TokenType = POW
-				t.Lit = string(s.buf[0:2])
-			}
+		if len(s.buf) > 1 && s.buf[1] == '*' {
+			t.TokenType = POW
+			t.Lit = string(s.buf[0:2])
 		}
-
-		break
 	case '/':
 		t.TokenType = DIV
 	case '<':

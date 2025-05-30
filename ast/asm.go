@@ -32,9 +32,7 @@ func (asm *assembler) VisitDecl(u Decl) {
 	switch dec := u.(type) {
 	case *FuncDecl:
 		src := &bytes.Buffer{}
-		img := run.FuncImage{
-			DatSz: 8,
-		}
+		img := run.FuncImage{DatSz: 16}
 
 		asm.img = &img
 		asm.src = src
@@ -60,7 +58,7 @@ func (asm *assembler) VisitDecl(u Decl) {
 		if img.ArgSz != 0 {
 			binary.Write(asm.src, binary.LittleEndian, byte(run.SAII))
 			binary.Write(asm.src, binary.LittleEndian, uint32(0))
-			binary.Write(asm.src, binary.LittleEndian, uint32(8))
+			binary.Write(asm.src, binary.LittleEndian, uint32(16))
 			binary.Write(asm.src, binary.LittleEndian, uint32(img.ArgSz))
 		}
 
@@ -81,6 +79,16 @@ func (asm *assembler) VisitStmt(u Stmt) {
 			b.Accept(asm)
 		}
 	case *AssignStmt:
+		if s.Ini {
+			binary.Write(asm.src, binary.LittleEndian, byte(run.LBII))
+			binary.Write(asm.src, binary.LittleEndian, uint32(8))
+			binary.Write(asm.src, binary.LittleEndian, uint32(0))
+
+		}
+
+		src := asm.src
+		asm.src = &bytes.Buffer{}
+
 		s.Val.Accept(asm)
 
 		b, o := asm.getPosition(s.Var)
@@ -104,6 +112,14 @@ func (asm *assembler) VisitStmt(u Stmt) {
 			binary.Write(asm.src, binary.LittleEndian, uint32(o))
 			binary.Write(asm.src, binary.LittleEndian, uint32(s.Var.Type().Size()))
 		}
+
+		if s.Ini {
+			binary.Write(src, binary.LittleEndian, byte(run.JIF))
+			binary.Write(src, binary.LittleEndian, int32(asm.src.Len()))
+		}
+
+		binary.Write(src, binary.LittleEndian, asm.src.Bytes())
+		asm.src = src
 	case *LoopStmt:
 		cur := asm.src.Len()
 

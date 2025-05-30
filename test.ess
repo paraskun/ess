@@ -1,14 +1,32 @@
-func main() {
-  var a = 10;
+func mean(v f64) f64 {
+  var c := 0.0;
+  var s := 0.0;
 
-  if 1 < 2 {
-    a = a + 1;
-  }
+  c = c + 1.0;
+  s = s + v;
 
-  log(a);
+  return s / c;
+}
 
-  for a > 5 {
-    a = a - 1;
-    log(a);
-  }
+type event {
+  dev u64
+  val f64
+}
+
+func map(e event) u64 {
+  return e.id;
+}
+
+type result {
+  dev u64
+  mean f64
+}
+
+func reduce(e event) result {
+  var r = result {
+    dev: e.dev,
+    mean: mean(e.val)
+  };
+
+  return r;
 }

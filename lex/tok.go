@@ -53,7 +53,9 @@ const (
 	GE  // >=
 	EEQ // ==
 	NE  // !=
+
 	EQ  // =
+	INI // :=
 
 	// Logical operators
 
