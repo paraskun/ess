@@ -18,6 +18,7 @@ type (
 	// Package is a collection of related functions.
 	Package struct {
 		Img []Image
+		Map map[string]int
 	}
 
 	// Image is an layout for function data in memory
@@ -28,10 +29,9 @@ type (
 		DatSz int
 		ArgSz int
 
-		Imm []byte
-		Src []byte
-
-		Call []int
+		Imm      []byte
+		Src      []byte
+		CallInfo []int
 	}
 
 	// Frame is a representation of function call
@@ -39,8 +39,8 @@ type (
 	Frame struct {
 		*Image
 
-		Data []byte
-		Call []*Frame
+		Data     []byte
+		CallData []*Frame
 	}
 )
 
@@ -71,22 +71,19 @@ type Machine struct {
 // This function should be replaced by
 // environment provided one.
 func (vm *Machine) log() {
-	kind := vm.lu08()
-
-	switch typ.Kind(kind & 0b11100000) {
-	case typ.COMP:
+	switch typ.Kind(vm.LoadU08()) {
 	case typ.BOOL:
-		if vm.lu08() == 0 {
-			fmt.Println("false")
+		if vm.LoadU08() == 0 {
+			fmt.Printf("false\n")
 		} else {
-			fmt.Println("true")
+			fmt.Printf("true\n")
 		}
 	case typ.I64:
-		fmt.Printf("%v\n", vm.li64())
+		fmt.Printf("%v\n", vm.LoadI64())
 	case typ.U64:
-		fmt.Printf("%v\n", vm.lu64())
+		fmt.Printf("%v\n", vm.LoadU64())
 	case typ.F64:
-		fmt.Printf("%v\n", vm.lf64())
+		fmt.Printf("%v\n", vm.LoadF64())
 	}
 }
 
@@ -99,16 +96,16 @@ func (vm *Machine) loadFunc(n int) *Frame {
 
 	fi := &vm.Pkg.Img[n]
 	ff := &Frame{
-		Image: fi,
-		Data:  make([]byte, fi.DatSz),
-		Call:  make([]*Frame, len(fi.Call)),
+		Image:    fi,
+		Data:     make([]byte, fi.DatSz),
+		CallData: make([]*Frame, len(fi.CallInfo)),
 	}
 
 	*(*uintptr)(unsafe.Pointer(&ff.Data[0])) = uintptr(unsafe.Pointer(&ff.Data[0]))
 	*(*uintptr)(unsafe.Pointer(&ff.Data[8])) = uintptr(unsafe.Pointer(&vm.vmd[0]))
 
-	for i, c := range fi.Call {
-		ff.Call[i] = vm.loadFunc(c)
+	for i, c := range fi.CallInfo {
+		ff.CallData[i] = vm.loadFunc(c)
 	}
 
 	return ff
@@ -120,488 +117,486 @@ func (vm *Machine) Load(pkg *Package, name string) {
 	vm.nat = []func(){vm.log}
 	vm.vmd = make([]byte, 1)
 	vm.vms = make([]byte, StackSize)
+	vm.rsp = unsafe.Pointer(&vm.vms[0])
 
-	vm.sf = make([]*Frame, 1)
+	idx, ok := pkg.Map[name]
+
+	if !ok {
+		panic(fmt.Errorf("function with name %v not found", name))
+	}
+
+	vm.cf = vm.loadFunc(idx)
+	vm.sf = []*Frame{vm.cf}
 	vm.sp = make([]unsafe.Pointer, 0)
-
-	for i, img := range pkg.Img {
-		if img.Name == name {
-
-		}
-	}
-	m.frame = m.rf[0]
-
-	m.rsp = unsafe.Pointer(&m.stack[0])
-	m.rbp = unsafe.Pointer(&m.frame.Data[0])
-
-	if len(m.frame.Func.Imm) > 0 {
-		m.rcp = unsafe.Pointer(&m.frame.Func.Imm[0])
-	}
 }
 
-func (m *Machine) Exec(arg []byte) {
-	m.frame = m.rf[0]
-	m.rip = unsafe.Pointer(&m.rf[0].Func.Src[0])
+func (vm *Machine) Exec(arg []byte) {
+	vm.cf = vm.sf[0]
+	vm.rip = unsafe.Pointer(&vm.cf.Src[0])
+	vm.rbp = unsafe.Pointer(&vm.cf.Data[0])
 
-	m.data[0] = 0
-
-	if m.ini {
-		m.data[0] = 1
-		m.ini = false
+	if len(vm.cf.Imm) > 0 {
+		vm.rcp = unsafe.Pointer(&vm.cf.Imm[0])
 	}
 
+	vm.vmd[0] = 0
 	num := len(arg)
-	dst := unsafe.Slice((*byte)(m.rsp), num)
+	dst := unsafe.Slice((*byte)(vm.rsp), num)
 
 	copy(dst[:num], arg[:num])
 
-	m.rsp = unsafe.Add(m.rsp, num)
+	vm.rsp = unsafe.Add(vm.rsp, num)
 
 	for {
-		cmd := Code(m.nu08())
+		cmd := Code(vm.nu08())
 
 		switch cmd {
 		case JMP:
-			m.rip = unsafe.Add(m.rip, m.ni32())
+			vm.rip = unsafe.Add(vm.rip, vm.ni32())
 		case JIF:
-			off := m.ni32()
+			off := vm.ni32()
 
-			if m.lu08() == 0 {
-				m.rip = unsafe.Add(m.rip, off)
+			if vm.LoadU08() == 0 {
+				vm.rip = unsafe.Add(vm.rip, off)
 			}
 		case CALL:
-			idx := m.nu32()
-			fun := m.frame.Func.Call[idx]
+			idx := vm.nu32()
+			fun := vm.cf.CallInfo[idx]
 
 			if fun < 0 {
-				m.nat[-fun-1]()
+				vm.nat[-fun-1]()
 				continue
 			}
 
-			m.rf = append(m.rf, m.frame.Call[idx])
-			m.frame = m.rf[len(m.rf)-1]
-			m.rp = append(m.rp, m.rip)
-			m.rip = unsafe.Pointer(&m.frame.Func.Src[0])
-			m.rbp = unsafe.Pointer(&m.frame.Data[0])
-			m.rcp = unsafe.Pointer(&m.frame.Func.Imm[0])
+			vm.cf = vm.cf.CallData[idx]
+			vm.sf = append(vm.sf, vm.cf)
+			vm.sp = append(vm.sp, vm.rip)
+
+			vm.rip = unsafe.Pointer(&vm.cf.Src[0])
+			vm.rbp = unsafe.Pointer(&vm.cf.Data[0])
+
+			if len(vm.cf.Imm) > 0 {
+				vm.rcp = unsafe.Pointer(&vm.cf.Imm[0])
+			}
 		case RET:
-			if len(m.rf) == 1 {
+			if len(vm.sf) == 1 {
 				return
 			}
 
-			m.rf = m.rf[:len(m.rf)-1]
+			vm.sf = vm.sf[:len(vm.sf)-1]
+			vm.cf = vm.sf[len(vm.sf)-1]
 
-			m.frame = m.rf[len(m.rf)-1]
-			m.rip = m.rp[len(m.rp)-1]
-			m.rp = m.rp[:len(m.rp)-1]
-			m.rbp = unsafe.Pointer(&m.frame.Data[0])
+			vm.rip = vm.sp[len(vm.sp)-1]
+			vm.rbp = unsafe.Pointer(&vm.cf.Data[0])
 
-			if len(m.frame.Func.Imm) > 0 {
-				m.rcp = unsafe.Pointer(&m.frame.Func.Imm[0])
+			vm.sp = vm.sp[:len(vm.sp)-1]
+
+			if len(vm.cf.Imm) > 0 {
+				vm.rcp = unsafe.Pointer(&vm.cf.Imm[0])
 			}
 		case PUSHB:
-			m.su08(m.nu08())
+			vm.su08(vm.nu08())
 		case PUSHW:
-			m.su32(m.nu32())
+			vm.su32(vm.nu32())
 		case PUSHD:
-			m.su64(m.nu64())
+			vm.su64(vm.nu64())
 		case LEAII:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
-			m.su64(uint64(*(*uintptr)(off)))
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(uintptr(*(*uint64)(ptr))), vm.nu32())
+			vm.su64(uint64(*(*uintptr)(off)))
 		case LBII:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			m.su08(*(*uint8)(off))
+			vm.su08(*(*uint8)(off))
 		case LWII:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			m.su32(*(*uint32)(off))
+			vm.su32(*(*uint32)(off))
 		case LDII:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(uintptr(*(*uint64)(ptr))), vm.nu32())
 
-			m.su64(*(*uint64)(off))
+			vm.su64(*(*uint64)(off))
 		case LAII:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
-			num := int(m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
+			num := int(vm.nu32())
 
 			src := unsafe.Slice((*byte)(off), num)
-			dst := unsafe.Slice((*byte)(m.rsp), num)
+			dst := unsafe.Slice((*byte)(vm.rsp), num)
 
 			copy(dst[:num], src[:num])
 
-			m.rsp = unsafe.Add(m.rsp, num)
+			vm.rsp = unsafe.Add(vm.rsp, num)
 		case SBII:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			*(*uint8)(off) = m.lu08()
+			*(*uint8)(off) = vm.LoadU08()
 		case SWII:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			*(*uint32)(off) = m.lu32()
+			*(*uint32)(off) = vm.LoadU32()
 		case SDII:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			*(*uint64)(off) = m.lu64()
+			*(*uint64)(off) = vm.LoadU64()
 		case SAII:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
-			num := int(m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
+			num := int(vm.nu32())
 
-			m.rsp = unsafe.Add(m.rsp, -num)
+			vm.rsp = unsafe.Add(vm.rsp, -num)
 
-			src := unsafe.Slice((*byte)(m.rsp), num)
+			src := unsafe.Slice((*byte)(vm.rsp), num)
 			dst := unsafe.Slice((*byte)(off), num)
 
 			copy(dst[:num], src[:num])
 		case LBIS:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			m.su08(*(*uint8)(off))
+			vm.su08(*(*uint8)(off))
 		case LWIS:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			m.su32(*(*uint32)(off))
+			vm.su32(*(*uint32)(off))
 		case LDIS:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			m.su64(*(*uint64)(off))
+			vm.su64(*(*uint64)(off))
 		case LAIS:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
-			num := int(m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
+			num := int(vm.nu32())
 
 			src := unsafe.Slice((*byte)(off), num)
-			dst := unsafe.Slice((*byte)(m.rsp), num)
+			dst := unsafe.Slice((*byte)(vm.rsp), num)
 
 			copy(dst[:num], src[:num])
 
-			m.rsp = unsafe.Add(m.rsp, num)
+			vm.rsp = unsafe.Add(vm.rsp, num)
 		case SBIS:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			*(*uint8)(off) = m.lu08()
+			*(*uint8)(off) = vm.LoadU08()
 		case SWIS:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			*(*uint32)(off) = m.lu32()
+			*(*uint32)(off) = vm.LoadU32()
 		case SDIS:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			*(*uint64)(off) = m.lu64()
+			*(*uint64)(off) = vm.LoadU64()
 		case SAIS:
-			ptr := unsafe.Add(m.rbp, m.nu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
-			num := int(m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.nu32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
+			num := int(vm.nu32())
 
-			m.rsp = unsafe.Add(m.rsp, -num)
+			vm.rsp = unsafe.Add(vm.rsp, -num)
 
-			src := unsafe.Slice((*byte)(m.rsp), num)
+			src := unsafe.Slice((*byte)(vm.rsp), num)
 			dst := unsafe.Slice((*byte)(off), num)
 
 			copy(dst[:num], src[:num])
 		case LBSI:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			m.su08(*(*uint8)(off))
+			vm.su08(*(*uint8)(off))
 		case LWSI:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			m.su32(*(*uint32)(off))
+			vm.su32(*(*uint32)(off))
 		case LDSI:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			m.su64(*(*uint64)(off))
+			vm.su64(*(*uint64)(off))
 		case LASI:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
-			num := int(m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
+			num := int(vm.nu32())
 
 			src := unsafe.Slice((*byte)(off), num)
-			dst := unsafe.Slice((*byte)(m.rsp), num)
+			dst := unsafe.Slice((*byte)(vm.rsp), num)
 
 			copy(dst[:num], src[:num])
 
-			m.rsp = unsafe.Add(m.rsp, num)
+			vm.rsp = unsafe.Add(vm.rsp, num)
 		case SBSI:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			*(*uint8)(off) = m.lu08()
+			*(*uint8)(off) = vm.LoadU08()
 		case SWSI:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			*(*uint32)(off) = m.lu32()
+			*(*uint32)(off) = vm.LoadU32()
 		case SDSI:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
 
-			*(*uint64)(off) = m.lu64()
+			*(*uint64)(off) = vm.LoadU64()
 		case SASI:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.nu32())
-			num := int(m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.nu32())
+			num := int(vm.nu32())
 
-			m.rsp = unsafe.Add(m.rsp, -num)
+			vm.rsp = unsafe.Add(vm.rsp, -num)
 
-			src := unsafe.Slice((*byte)(m.rsp), num)
+			src := unsafe.Slice((*byte)(vm.rsp), num)
 			dst := unsafe.Slice((*byte)(off), num)
 
 			copy(dst[:num], src[:num])
 		case LBSS:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			m.su08(*(*uint8)(off))
+			vm.su08(*(*uint8)(off))
 		case LWSS:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			m.su32(*(*uint32)(off))
+			vm.su32(*(*uint32)(off))
 		case LDSS:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			m.su64(*(*uint64)(off))
+			vm.su64(*(*uint64)(off))
 		case LASS:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
-			num := int(m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
+			num := int(vm.nu32())
 
 			src := unsafe.Slice((*byte)(off), num)
-			dst := unsafe.Slice((*byte)(m.rsp), num)
+			dst := unsafe.Slice((*byte)(vm.rsp), num)
 
 			copy(dst[:num], src[:num])
 
-			m.rsp = unsafe.Add(m.rsp, num)
+			vm.rsp = unsafe.Add(vm.rsp, num)
 		case SBSS:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			*(*uint8)(off) = m.lu08()
+			*(*uint8)(off) = vm.LoadU08()
 		case SWSS:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			*(*uint32)(off) = m.lu32()
+			*(*uint32)(off) = vm.LoadU32()
 		case SDSS:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
 
-			*(*uint64)(off) = m.lu64()
+			*(*uint64)(off) = vm.LoadU64()
 		case SASS:
-			ptr := unsafe.Add(m.rbp, m.lu32())
-			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), m.lu32())
-			num := int(m.nu32())
+			ptr := unsafe.Add(vm.rbp, vm.LoadU32())
+			off := unsafe.Add(unsafe.Pointer(*(*uintptr)(ptr)), vm.LoadU32())
+			num := int(vm.nu32())
 
-			m.rsp = unsafe.Add(m.rsp, -num)
+			vm.rsp = unsafe.Add(vm.rsp, -num)
 
-			src := unsafe.Slice((*byte)(m.rsp), num)
+			src := unsafe.Slice((*byte)(vm.rsp), num)
 			dst := unsafe.Slice((*byte)(off), num)
 
 			copy(dst[:num], src[:num])
 		case LBI:
-			off := unsafe.Add(m.rcp, m.nu32())
-			m.su08(*(*uint8)(off))
+			off := unsafe.Add(vm.rcp, vm.nu32())
+			vm.su08(*(*uint8)(off))
 		case LWI:
-			off := unsafe.Add(m.rcp, m.nu32())
-			m.su32(*(*uint32)(off))
+			off := unsafe.Add(vm.rcp, vm.nu32())
+			vm.su32(*(*uint32)(off))
 		case LDI:
-			off := unsafe.Add(m.rcp, m.nu32())
-			m.su64(*(*uint64)(off))
+			off := unsafe.Add(vm.rcp, vm.nu32())
+			vm.su64(*(*uint64)(off))
 		case LAI:
-			off := unsafe.Add(m.rcp, m.nu32())
-			num := int(m.nu32())
+			off := unsafe.Add(vm.rcp, vm.nu32())
+			num := int(vm.nu32())
 
 			src := unsafe.Slice((*byte)(off), num)
-			dst := unsafe.Slice((*byte)(m.rsp), num)
+			dst := unsafe.Slice((*byte)(vm.rsp), num)
 
 			copy(dst[:num], src[:num])
 
-			m.rsp = unsafe.Add(m.rsp, num)
+			vm.rsp = unsafe.Add(vm.rsp, num)
 		case ADDI:
-			m.si64(m.li64() + m.li64())
+			vm.si64(vm.LoadI64() + vm.LoadI64())
 		case SUBI:
-			m.si64(m.li64() - m.li64())
+			vm.si64(vm.LoadI64() - vm.LoadI64())
 		case MULI:
-			m.si64(m.li64() * m.li64())
+			vm.si64(vm.LoadI64() * vm.LoadI64())
 		case DIVI:
-			m.si64(m.li64() / m.li64())
+			vm.si64(vm.LoadI64() / vm.LoadI64())
 		case POWI:
-			m.si64(int64(math.Pow(float64(m.li64()), float64(m.li64()))))
+			vm.si64(int64(math.Pow(float64(vm.LoadI64()), float64(vm.LoadI64()))))
 		case SHLI:
-			m.si64(m.li64() << m.li64())
+			vm.si64(vm.LoadI64() << vm.LoadI64())
 		case SHRI:
-			m.si64(m.li64() >> m.li64())
+			vm.si64(vm.LoadI64() >> vm.LoadI64())
 		case MODI:
-			m.si64(m.li64() % m.li64())
+			vm.si64(vm.LoadI64() % vm.LoadI64())
 		case XORI:
-			m.si64(m.li64() ^ m.li64())
+			vm.si64(vm.LoadI64() ^ vm.LoadI64())
 		case ANDI:
-			m.si64(m.li64() & m.li64())
+			vm.si64(vm.LoadI64() & vm.LoadI64())
 		case ORI:
-			m.si64(m.li64() | m.li64())
+			vm.si64(vm.LoadI64() | vm.LoadI64())
 		case BNEGI:
-			m.si64(^m.li64())
+			vm.si64(^vm.LoadI64())
 		case UNEGI:
-			m.si64(-m.li64())
+			vm.si64(-vm.LoadI64())
 		case LTI:
-			if m.li64() < m.li64() {
-				m.su08(1)
+			if vm.LoadI64() < vm.LoadI64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case LEI:
-			if m.li64() <= m.li64() {
-				m.su08(1)
+			if vm.LoadI64() <= vm.LoadI64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case EQI:
-			if m.li64() == m.li64() {
-				m.su08(1)
+			if vm.LoadI64() == vm.LoadI64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case NEI:
-			if m.li64() != m.li64() {
-				m.su08(1)
+			if vm.LoadI64() != vm.LoadI64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case ADDU:
-			m.su64(m.lu64() + m.lu64())
+			vm.su64(vm.LoadU64() + vm.LoadU64())
 		case SUBU:
-			m.su64(m.lu64() - m.lu64())
+			vm.su64(vm.LoadU64() - vm.LoadU64())
 		case MULU:
-			m.su64(m.lu64() * m.lu64())
+			vm.su64(vm.LoadU64() * vm.LoadU64())
 		case DIVU:
-			m.su64(m.lu64() / m.lu64())
+			vm.su64(vm.LoadU64() / vm.LoadU64())
 		case POWU:
-			m.su64(uint64(math.Pow(float64(m.lu64()), float64(m.lu64()))))
+			vm.su64(uint64(math.Pow(float64(vm.LoadU64()), float64(vm.LoadU64()))))
 		case SHLU:
-			m.su64(m.lu64() << m.lu64())
+			vm.su64(vm.LoadU64() << vm.LoadU64())
 		case SHRU:
-			m.su64(m.lu64() >> m.lu64())
+			vm.su64(vm.LoadU64() >> vm.LoadU64())
 		case MODU:
-			m.su64(m.lu64() % m.lu64())
+			vm.su64(vm.LoadU64() % vm.LoadU64())
 		case XORU:
-			m.su64(m.lu64() ^ m.lu64())
+			vm.su64(vm.LoadU64() ^ vm.LoadU64())
 		case ANDU:
-			m.su64(m.lu64() & m.lu64())
+			vm.su64(vm.LoadU64() & vm.LoadU64())
 		case ORU:
-			m.su64(m.lu64() | m.lu64())
+			vm.su64(vm.LoadU64() | vm.LoadU64())
 		case BNEGU:
-			m.su64(^m.lu64())
+			vm.su64(^vm.LoadU64())
 		case UNEGU:
-			m.su64(-m.lu64())
+			vm.su64(-vm.LoadU64())
 		case LTU:
-			if m.lu64() < m.lu64() {
-				m.su08(1)
+			if vm.LoadU64() < vm.LoadU64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case LEU:
-			if m.lu64() <= m.lu64() {
-				m.su08(1)
+			if vm.LoadU64() <= vm.LoadU64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case EQU:
-			if m.lu64() == m.lu64() {
-				m.su08(1)
+			if vm.LoadU64() == vm.LoadU64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case NEU:
-			if m.lu64() != m.lu64() {
-				m.su08(1)
+			if vm.LoadU64() != vm.LoadU64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case ADDF:
-			m.sf64(m.lf64() + m.lf64())
+			vm.sf64(vm.LoadF64() + vm.LoadF64())
 		case SUBF:
-			m.sf64(m.lf64() - m.lf64())
+			vm.sf64(vm.LoadF64() - vm.LoadF64())
 		case MULF:
-			m.sf64(m.lf64() * m.lf64())
+			vm.sf64(vm.LoadF64() * vm.LoadF64())
 		case DIVF:
-			m.sf64(m.lf64() / m.lf64())
+			vm.sf64(vm.LoadF64() / vm.LoadF64())
 		case POWF:
-			m.sf64(math.Pow(m.lf64(), m.lf64()))
+			vm.sf64(math.Pow(vm.LoadF64(), vm.LoadF64()))
 		case UNEGF:
-			m.sf64(-m.lf64())
+			vm.sf64(-vm.LoadF64())
 		case LTF:
-			if m.lf64() < m.lf64() {
-				m.su08(1)
+			if vm.LoadF64() < vm.LoadF64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case LEF:
-			if m.lf64() <= m.lf64() {
-				m.su08(1)
+			if vm.LoadF64() <= vm.LoadF64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case EQF:
-			if m.lf64() == m.lf64() {
-				m.su08(1)
+			if vm.LoadF64() == vm.LoadF64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case NEF:
-			if m.lf64() != m.lf64() {
-				m.su08(1)
+			if vm.LoadF64() != vm.LoadF64() {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case ANDL:
-			if m.lu08() == 0 || m.lu08() == 0 {
-				m.su08(0)
+			if vm.LoadU08() == 0 || vm.LoadU08() == 0 {
+				vm.su08(0)
 			} else {
-				m.su08(1)
+				vm.su08(1)
 			}
 		case ORL:
-			if m.lu08() == 0 && m.lu08() == 0 {
-				m.su08(0)
+			if vm.LoadU08() == 0 && vm.LoadU08() == 0 {
+				vm.su08(0)
 			} else {
-				m.su08(1)
+				vm.su08(1)
 			}
 		case NEGL:
-			if m.lu08() == 0 {
-				m.su08(1)
+			if vm.LoadU08() == 0 {
+				vm.su08(1)
 			} else {
-				m.su08(0)
+				vm.su08(0)
 			}
 		case I2U:
-			m.su64(uint64(m.li64()))
+			vm.su64(uint64(vm.LoadI64()))
 		case I2F:
-			m.sf64(float64(m.li64()))
+			vm.sf64(float64(vm.LoadI64()))
 		case U2I:
-			m.si64(int64(m.lu64()))
+			vm.si64(int64(vm.LoadU64()))
 		case U2F:
-			m.sf64(float64(m.lu64()))
+			vm.sf64(float64(vm.LoadU64()))
 		case F2I:
-			m.si64(int64(m.lf64()))
+			vm.si64(int64(vm.LoadF64()))
 		case F2U:
-			m.su64(uint64(m.lf64()))
+			vm.su64(uint64(vm.LoadF64()))
 		}
 	}
 }
@@ -634,32 +629,32 @@ func (m *Machine) ni32() int32 {
 	return r
 }
 
-func (m *Machine) li08() int8 {
+func (m *Machine) LoadI08() int8 {
 	m.rsp = unsafe.Add(m.rsp, -1)
 	return *(*int8)(m.rsp)
 }
 
-func (m *Machine) li64() int64 {
+func (m *Machine) LoadI64() int64 {
 	m.rsp = unsafe.Add(m.rsp, -8)
 	return *(*int64)(m.rsp)
 }
 
-func (m *Machine) lu08() uint8 {
+func (m *Machine) LoadU08() uint8 {
 	m.rsp = unsafe.Add(m.rsp, -1)
 	return *(*uint8)(m.rsp)
 }
 
-func (m *Machine) lu32() uint32 {
+func (m *Machine) LoadU32() uint32 {
 	m.rsp = unsafe.Add(m.rsp, -4)
 	return *(*uint32)(m.rsp)
 }
 
-func (m *Machine) lu64() uint64 {
+func (m *Machine) LoadU64() uint64 {
 	m.rsp = unsafe.Add(m.rsp, -8)
 	return *(*uint64)(m.rsp)
 }
 
-func (m *Machine) lf64() float64 {
+func (m *Machine) LoadF64() float64 {
 	m.rsp = unsafe.Add(m.rsp, -8)
 	return *(*float64)(m.rsp)
 }
@@ -694,13 +689,13 @@ func (m *Machine) sf64(v float64) {
 	m.rsp = unsafe.Add(m.rsp, 8)
 }
 
-func (p *Pragma) Debug(w io.Writer) {
+func (p *Package) Debug(w io.Writer) {
 	for _, img := range p.Img {
 		img.Debug(w)
 	}
 }
 
-func (img *FuncImage) Debug(w io.Writer) {
+func (img *Image) Debug(w io.Writer) {
 	fmt.Fprintf(w, ".func\n")
 	fmt.Fprintf(w, "\tdat: %d\n", img.DatSz)
 	fmt.Fprintf(w, "\targ: %d\n", img.ArgSz)

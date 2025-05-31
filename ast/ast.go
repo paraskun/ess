@@ -194,6 +194,7 @@ type (
 		Tok *lex.Token
 		Env *typ.Env
 		Sym *typ.Type
+		Pkg bool
 
 		Spec *FuncSpec
 		Body *BlockStmt
@@ -206,7 +207,7 @@ type (
 	}
 )
 
-type Pragma struct {
+type Package struct {
 	Env *typ.Env
 	Dec []Decl
 }
@@ -251,9 +252,9 @@ func (p *parser) expect(tt lex.TokenType) *lex.Token {
 	return p.cur
 }
 
-func Parse(buf []rune) *Pragma {
+func Parse(buf []rune) *Package {
 	p := parser{}
-	r := Pragma{}
+	r := Package{}
 
 	p.lex.Load(buf)
 
@@ -267,7 +268,10 @@ func Parse(buf []rune) *Pragma {
 func (p *parser) parseDecl() Decl {
 	switch p.peek().TokenType {
 	case lex.FUNC:
-		return p.parseFuncDecl()
+		dec := p.parseFuncDecl()
+		dec.Pkg = true
+
+		return dec
 	case lex.TYPE:
 		return p.parseCompDecl()
 	}

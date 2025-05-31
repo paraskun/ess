@@ -3,28 +3,29 @@ package ast
 import (
 	"bytes"
 	"encoding/binary"
-	"slices"
 
 	"github.com/paraskun/ess-go/lex"
 	"github.com/paraskun/ess-go/run"
 	"github.com/paraskun/ess-go/typ"
 )
 
-func Assemble(p *Pragma) *run.Pragma {
+func Assemble(p *Package) *run.Package {
 	a := assembler{
-		obj: &run.Pragma{},
+		pkg: &run.Package{
+			Map: make(map[string]int),
+		},
 	}
 
 	for _, d := range p.Dec {
 		d.Accept(&a)
 	}
 
-	return a.obj
+	return a.pkg
 }
 
 type assembler struct {
-	obj *run.Pragma
-	img *run.FuncImage
+	pkg *run.Package
+	img *run.Image
 	src *bytes.Buffer
 }
 
@@ -32,7 +33,7 @@ func (asm *assembler) VisitDecl(u Decl) {
 	switch dec := u.(type) {
 	case *FuncDecl:
 		src := &bytes.Buffer{}
-		img := run.FuncImage{DatSz: 16}
+		img := run.Image{DatSz: 16}
 
 		asm.img = &img
 		asm.src = src
@@ -68,7 +69,11 @@ func (asm *assembler) VisitDecl(u Decl) {
 		img.Imm = buf.Bytes()
 		img.Src = src.Bytes()
 
-		asm.obj.Img = append(asm.obj.Img, img)
+		asm.pkg.Img = append(asm.pkg.Img, img)
+
+		if dec.Pkg {
+			asm.pkg.Map[dec.Tok.Lit] = len(asm.pkg.Img) - 1
+		}
 	}
 }
 
@@ -289,8 +294,8 @@ func (asm *assembler) VisitExpr(u Expr) {
 			}
 		}
 
-		idx := len(asm.img.Call)
-		asm.img.Call = append(asm.img.Call, inf.Off)
+		idx := len(asm.img.CallInfo)
+		asm.img.CallInfo = append(asm.img.CallInfo, inf.Off)
 
 		binary.Write(asm.src, binary.LittleEndian, byte(run.CALL))
 		binary.Write(asm.src, binary.LittleEndian, uint32(idx))
@@ -349,45 +354,10 @@ func (asm *assembler) getPosition(u Expr) (b int, o int) {
 }
 
 func (asm *assembler) pushMeta(u Expr) {
-	ref := false
-
-	switch e := u.(type) {
-	case *IdfExpr, *DotExpr:
-		if e.Type().Kind == typ.COMP {
-			ref = true
-		}
-	}
-
-	asm.pushType(u.Type(), ref)
-}
-
-func (asm *assembler) pushType(t *typ.Type, ref bool) {
-	kind := byte(t.Kind)
-
-	if ref {
-		kind |= 1 << 4
+	if u.Type().Kind == typ.COMP {
+		panic("unsupported data type")
 	}
 
 	binary.Write(asm.src, binary.LittleEndian, byte(run.PUSHB))
-	binary.Write(asm.src, binary.LittleEndian, byte(kind))
-
-	if t.Kind == typ.COMP {
-		fm := t.Info.(*typ.CompInfo).Fields
-		fs := make([]*typ.Field, len(fm))
-
-		for _, f := range fm {
-			fs = append(fs, f)
-		}
-
-		slices.SortFunc(fs, func(a, b *typ.Field) int {
-			return a.Off - b.Off
-		})
-
-		binary.Write(asm.src, binary.LittleEndian, byte(run.PUSHB))
-		binary.Write(asm.src, binary.LittleEndian, byte(len(t.Info.(*typ.CompInfo).Fields)))
-
-		for _, f := range fs {
-			asm.pushType(f.Typ, false)
-		}
-	}
+	binary.Write(asm.src, binary.LittleEndian, byte(byte(u.Type().Kind)))
 }

@@ -14,7 +14,7 @@ type event {
 }
 
 func map(e event) u64 {
-  return e.id;
+  return e.dev;
 }
 
 type result {

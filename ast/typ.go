@@ -13,7 +13,7 @@ type typer struct {
 	funNum int
 }
 
-func Typeset(p *Pragma) {
+func Typeset(p *Package) {
 	p.Env = typ.NewEnv(nil)
 
 	p.Env.InsertFun("log", &typ.LogType)
