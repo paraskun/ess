@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"encoding/binary"
 
+	"github.com/paraskun/ess-go/img"
 	"github.com/paraskun/ess-go/lex"
 	"github.com/paraskun/ess-go/run"
 	"github.com/paraskun/ess-go/typ"
 )
 
-func Assemble(p *Package) *run.Package {
+func Assemble(p *Package) *img.Package {
 	a := assembler{
-		pkg: &run.Package{
-			Map: make(map[string]int),
+		pkg: &img.Package{
+			Name: p.Name,
 		},
 	}
 
@@ -24,8 +25,8 @@ func Assemble(p *Package) *run.Package {
 }
 
 type assembler struct {
-	pkg *run.Package
-	img *run.Image
+	pkg *img.Package
+	fun *img.Func
 	src *bytes.Buffer
 }
 
@@ -33,17 +34,17 @@ func (asm *assembler) VisitDecl(u Decl) {
 	switch dec := u.(type) {
 	case *FuncDecl:
 		src := &bytes.Buffer{}
-		img := run.Image{DatSz: 16}
+		fun := img.Func{DataSize: 16}
 
-		asm.img = &img
+		asm.fun = &fun
 		asm.src = src
 
 		for _, arg := range dec.Spec.Arg {
-			argSz := arg.Obj.Size()
+			argSize := uint32(arg.Obj.Size())
 
-			arg.Obj.Off = img.DatSz
-			img.DatSz += argSz
-			img.ArgSz += argSz
+			arg.Obj.Off = int(fun.DataSize)
+			fun.DataSize += argSize
+			fun.ArgsSize += argSize
 		}
 
 		buf := &bytes.Buffer{}
@@ -56,24 +57,19 @@ func (asm *assembler) VisitDecl(u Decl) {
 			binary.Write(buf, binary.LittleEndian, obj.Val)
 		}
 
-		if img.ArgSz != 0 {
+		if fun.ArgsSize != 0 {
 			binary.Write(asm.src, binary.LittleEndian, byte(run.SAII))
 			binary.Write(asm.src, binary.LittleEndian, uint32(0))
 			binary.Write(asm.src, binary.LittleEndian, uint32(16))
-			binary.Write(asm.src, binary.LittleEndian, uint32(img.ArgSz))
+			binary.Write(asm.src, binary.LittleEndian, uint32(fun.ArgsSize))
 		}
 
 		dec.Body.Accept(asm)
 		binary.Write(asm.src, binary.LittleEndian, byte(run.RET))
 
-		img.Imm = buf.Bytes()
-		img.Src = src.Bytes()
-
-		asm.pkg.Img = append(asm.pkg.Img, img)
-
-		if dec.Pkg {
-			asm.pkg.Map[dec.Tok.Lit] = len(asm.pkg.Img) - 1
-		}
+		fun.Immediate = buf.Bytes()
+		fun.Source = src.Bytes()
+		asm.pkg.Funcs = append(asm.pkg.Funcs, &fun)
 	}
 }
 
@@ -294,8 +290,8 @@ func (asm *assembler) VisitExpr(u Expr) {
 			}
 		}
 
-		idx := len(asm.img.CallInfo)
-		asm.img.CallInfo = append(asm.img.CallInfo, inf.Off)
+		idx := len(asm.fun.CallInfo)
+		asm.fun.CallInfo = append(asm.fun.CallInfo, uint32(inf.Off))
 
 		binary.Write(asm.src, binary.LittleEndian, byte(run.CALL))
 		binary.Write(asm.src, binary.LittleEndian, uint32(idx))
@@ -333,8 +329,8 @@ func (asm *assembler) getPosition(u Expr) (b int, o int) {
 	switch exp := u.(type) {
 	case *IdfExpr:
 		if exp.Obj.Off == -1 {
-			exp.Obj.Off = asm.img.DatSz
-			asm.img.DatSz += exp.Obj.Size()
+			exp.Obj.Off = int(asm.fun.DataSize)
+			asm.fun.DataSize += uint32(exp.Obj.Size())
 		}
 
 		if exp.Obj.Ref {

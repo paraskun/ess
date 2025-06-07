@@ -208,8 +208,9 @@ type (
 )
 
 type Package struct {
-	Env *typ.Env
-	Dec []Decl
+	Name string
+	Env  *typ.Env
+	Dec  []Decl
 }
 
 type parser struct {

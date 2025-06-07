@@ -1,12 +1,11 @@
 package run
 
 import (
-	"encoding/binary"
 	"fmt"
-	"io"
 	"math"
 	"unsafe"
 
+	"github.com/paraskun/ess-go/img"
 	"github.com/paraskun/ess-go/typ"
 )
 
@@ -14,39 +13,18 @@ const (
 	StackSize = 1024 // stack size in bytes
 )
 
-type (
-	// Package is a collection of related functions.
-	Package struct {
-		Img []Image
-		Map map[string]int
-	}
+// Frame is a representation of function
+// call in memory.
+type Frame struct {
+	*img.Func
 
-	// Image is an layout for function data in memory
-	// with additional meta information.
-	Image struct {
-		Name string
-
-		DatSz int
-		ArgSz int
-
-		Imm      []byte
-		Src      []byte
-		CallInfo []int
-	}
-
-	// Frame is a representation of function call
-	// in memory.
-	Frame struct {
-		*Image
-
-		Data     []byte
-		CallData []*Frame
-	}
-)
+	Data     []byte
+	CallData []*Frame
+}
 
 // Virtual machine
 type Machine struct {
-	Pkg *Package
+	Pkg *img.Package
 
 	rip unsafe.Pointer // instruction pointer
 	rsp unsafe.Pointer // stack pointer
@@ -94,10 +72,10 @@ func (vm *Machine) loadFunc(n int) *Frame {
 		return nil // native function
 	}
 
-	fi := &vm.Pkg.Img[n]
+	fi := vm.Pkg.Funcs[n]
 	ff := &Frame{
-		Image:    fi,
-		Data:     make([]byte, fi.DatSz),
+		Func:     fi,
+		Data:     make([]byte, fi.DataSize),
 		CallData: make([]*Frame, len(fi.CallInfo)),
 	}
 
@@ -105,13 +83,13 @@ func (vm *Machine) loadFunc(n int) *Frame {
 	*(*uintptr)(unsafe.Pointer(&ff.Data[8])) = uintptr(unsafe.Pointer(&vm.vmd[0]))
 
 	for i, c := range fi.CallInfo {
-		ff.CallData[i] = vm.loadFunc(c)
+		ff.CallData[i] = vm.loadFunc(int(c))
 	}
 
 	return ff
 }
 
-func (vm *Machine) Load(pkg *Package, name string) {
+func (vm *Machine) Load(pkg *img.Package, name string) {
 	vm.Pkg = pkg
 
 	vm.nat = []func(){vm.log}
@@ -119,24 +97,24 @@ func (vm *Machine) Load(pkg *Package, name string) {
 	vm.vms = make([]byte, StackSize)
 	vm.rsp = unsafe.Pointer(&vm.vms[0])
 
-	idx, ok := pkg.Map[name]
+	// 	idx, ok := pkg.Map[name]
+	//
+	// 	if !ok {
+	// 		panic(fmt.Errorf("function with name %v not found", name))
+	// 	}
 
-	if !ok {
-		panic(fmt.Errorf("function with name %v not found", name))
-	}
-
-	vm.cf = vm.loadFunc(idx)
+	vm.cf = vm.loadFunc(0)
 	vm.sf = []*Frame{vm.cf}
 	vm.sp = make([]unsafe.Pointer, 0)
 }
 
 func (vm *Machine) Exec(arg []byte) {
 	vm.cf = vm.sf[0]
-	vm.rip = unsafe.Pointer(&vm.cf.Src[0])
+	vm.rip = unsafe.Pointer(&vm.cf.Source[0])
 	vm.rbp = unsafe.Pointer(&vm.cf.Data[0])
 
-	if len(vm.cf.Imm) > 0 {
-		vm.rcp = unsafe.Pointer(&vm.cf.Imm[0])
+	if len(vm.cf.Immediate) > 0 {
+		vm.rcp = unsafe.Pointer(&vm.cf.Immediate[0])
 	}
 
 	vm.vmd[0] = 0
@@ -172,11 +150,11 @@ func (vm *Machine) Exec(arg []byte) {
 			vm.sf = append(vm.sf, vm.cf)
 			vm.sp = append(vm.sp, vm.rip)
 
-			vm.rip = unsafe.Pointer(&vm.cf.Src[0])
+			vm.rip = unsafe.Pointer(&vm.cf.Source[0])
 			vm.rbp = unsafe.Pointer(&vm.cf.Data[0])
 
-			if len(vm.cf.Imm) > 0 {
-				vm.rcp = unsafe.Pointer(&vm.cf.Imm[0])
+			if len(vm.cf.Immediate) > 0 {
+				vm.rcp = unsafe.Pointer(&vm.cf.Immediate[0])
 			}
 		case RET:
 			if len(vm.sf) == 1 {
@@ -191,8 +169,8 @@ func (vm *Machine) Exec(arg []byte) {
 
 			vm.sp = vm.sp[:len(vm.sp)-1]
 
-			if len(vm.cf.Imm) > 0 {
-				vm.rcp = unsafe.Pointer(&vm.cf.Imm[0])
+			if len(vm.cf.Immediate) > 0 {
+				vm.rcp = unsafe.Pointer(&vm.cf.Immediate[0])
 			}
 		case PUSHB:
 			vm.su08(vm.nu08())
@@ -687,95 +665,4 @@ func (m *Machine) su64(v uint64) {
 func (m *Machine) sf64(v float64) {
 	*(*float64)(m.rsp) = v
 	m.rsp = unsafe.Add(m.rsp, 8)
-}
-
-func (p *Package) Debug(w io.Writer) {
-	for _, img := range p.Img {
-		img.Debug(w)
-	}
-}
-
-func (img *Image) Debug(w io.Writer) {
-	fmt.Fprintf(w, ".func\n")
-	fmt.Fprintf(w, "\tdat: %d\n", img.DatSz)
-	fmt.Fprintf(w, "\targ: %d\n", img.ArgSz)
-	fmt.Fprintf(w, ".text\n")
-
-	src := img.Src
-	idx := 0
-
-	for off := 0; off < len(src); {
-		fmt.Fprintf(w, "\t%d.\t\t%-4d ", idx, off)
-		idx += 1
-
-		switch Code(src[off]) {
-		case PUSHB:
-			fmt.Fprintf(w, "%s %d\n", Code(src[off]).String(), src[off+1])
-			off += 2
-		case PUSHD:
-			fmt.Fprintf(w, "%s %d\n",
-				Code(src[off]).String(),
-				binary.LittleEndian.Uint64(src[off+1:]),
-			)
-			off += 9
-		case LAIS, SAIS, LASI, SASI,
-			LBII, LWII, LDII, SBII,
-			SWII, SDII, LEAII, LAI:
-			fmt.Fprintf(w, "%s %d %d\n", Code(src[off]).String(),
-				binary.LittleEndian.Uint32(src[off+1:]),
-				binary.LittleEndian.Uint32(src[off+5:]),
-			)
-			off += 9
-		case LAII, SAII:
-			fmt.Fprintf(w, "%s %d %d %d\n", Code(src[off]).String(),
-				binary.LittleEndian.Uint32(src[off+1:]),
-				binary.LittleEndian.Uint32(src[off+5:]),
-				binary.LittleEndian.Uint32(src[off+9:]),
-			)
-			off += 13
-		case JMP, JIF:
-			jmp := int32(binary.LittleEndian.Uint32(src[off+1:]))
-			fmt.Fprintf(w, "%s %d (%d)\n",
-				Code(src[off]).String(),
-				jmp,
-				int32(off)+5+jmp,
-			)
-			off += 5
-		case CALL:
-			fmt.Fprintf(w, "%s %d\n",
-				Code(src[off]).String(),
-				int32(binary.LittleEndian.Uint32(src[off+1:])),
-			)
-			off += 5
-		case LASS, SASS, PUSHW,
-			LBIS, LWIS, LDIS, SBIS,
-			SWIS, SDIS, LBSI, LWSI,
-			LDSI, SBSI, SWSI, SDSI,
-			LBI, LWI, LDI:
-			fmt.Fprintf(w, "%s %d\n",
-				Code(src[off]).String(),
-				binary.LittleEndian.Uint32(src[off+1:]),
-			)
-			off += 5
-		case RET, LBSS, LWSS, LDSS,
-			SBSS, SWSS, SDSS, ADDI,
-			SUBI, MULI, DIVI, POWI,
-			SHLI, SHRI, MODI, XORI,
-			ANDI, ORI, BNEGI, UNEGI,
-			LTI, LEI, EQI, NEI,
-			ADDU, SUBU, MULU, DIVU,
-			POWU, SHLU, SHRU, MODU,
-			XORU, ANDU, ORU, BNEGU,
-			UNEGU, LTU, LEU, EQU,
-			NEU, ADDF, SUBF, MULF,
-			DIVF, POWF, UNEGF, LTF,
-			LEF, EQF, NEF, ANDL,
-			ORL, NEGL, I2U, I2F,
-			U2I, U2F, F2I, F2U:
-			fmt.Fprintf(w, "%s\n", Code(src[off]).String())
-			off += 1
-		default:
-			panic(fmt.Errorf("unkown opcode: %d", src[off]))
-		}
-	}
 }
