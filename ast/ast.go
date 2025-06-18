@@ -3,8 +3,8 @@ package ast
 import (
 	"fmt"
 
-	"github.com/paraskun/ess-go/lex"
-	"github.com/paraskun/ess-go/typ"
+	"github.com/paraskun/x/lex"
+	"github.com/paraskun/x/typ"
 )
 
 type Visitor interface {
@@ -27,28 +27,30 @@ type (
 	}
 
 	BlockStmt struct {
-		Tok *lex.Token
 		Env *typ.Env
+		Tok *lex.Token // open '{'
 
 		Body []Stmt
 	}
 
 	AssignStmt struct {
-		Tok *lex.Token
+		Tok *lex.Token // = or :=
+
+		Dec bool
 		Var Expr
 		Val Expr
-		Dec bool
-		Ini bool
 	}
 
 	LoopStmt struct {
-		Tok *lex.Token
-		Con Expr
-		Rep *BlockStmt
+		Tok *lex.Token // for
+
+		Con Expr       // loop condition
+		Rep *BlockStmt // loop body
 	}
 
 	CondStmt struct {
-		Tok *lex.Token
+		Tok *lex.Token // if
+
 		Con Expr
 		Pos *BlockStmt
 		Neg *BlockStmt
@@ -59,7 +61,8 @@ type (
 	}
 
 	ReturnStmt struct {
-		Tok *lex.Token
+		Tok *lex.Token // return
+
 		Ret Expr
 	}
 )
@@ -74,21 +77,23 @@ type (
 		expr()
 	}
 
-	BaseImmExpr struct {
+	// Immediate expression of basic or enum type.
+	ImmExpr struct {
 		Tok *lex.Token
 		Obj *typ.Object
 	}
 
-	CompField struct {
-		Tok *lex.Token
+	StructField struct {
+		Tok *lex.Token // field name
 		Val Expr
 	}
 
-	CompImmExpr struct {
-		Tok *lex.Token
+	// Immediate expression of struct type.
+	StructExpr struct {
+		Tok *lex.Token // struct name
 		Typ *typ.Type
 
-		Fields []CompField
+		Fields []StructField
 	}
 
 	IdfExpr struct {
@@ -97,13 +102,14 @@ type (
 	}
 
 	DotExpr struct {
-		Tok *lex.Token
+		Tok *lex.Token // dot
 		Typ *typ.Type
 
-		Comp  Expr
+		Scope Expr // packet or struct
 		Field *lex.Token
 	}
 
+	// Infix expression.
 	InfExpr struct {
 		Tok *lex.Token
 		Typ *typ.Type
@@ -112,6 +118,7 @@ type (
 		Y Expr
 	}
 
+	// Prefix expression.
 	PfxExpr struct {
 		Tok *lex.Token
 		Typ *typ.Type
@@ -121,63 +128,31 @@ type (
 
 	CallExpr struct {
 		Tok *lex.Token
-		Typ *typ.Type
-		Sym *typ.Type
+		Typ *typ.Type // return type
+		Sym *typ.Type // target function
+
 		Arg []Expr
 	}
 
 	ToSigExpr struct {
 		Tok *lex.Token
-		Typ *typ.Type
+		Typ *typ.Type // i64
 
 		X Expr
 	}
 
 	ToUnsExpr struct {
 		Tok *lex.Token
-		Typ *typ.Type
+		Typ *typ.Type // u64
 
 		X Expr
 	}
 
 	ToFltExpr struct {
 		Tok *lex.Token
-		Typ *typ.Type
+		Typ *typ.Type // f64
 
 		X Expr
-	}
-)
-
-// Type specification
-
-type (
-	TypeSpec interface {
-		Type() *typ.Type
-		spec()
-	}
-
-	BaseSpec struct {
-		Tok *lex.Token
-		Typ *typ.Type
-	}
-
-	FieldSpec struct {
-		Tok *lex.Token  // maybe nil
-		Obj *typ.Object // maybe nil
-		Typ TypeSpec
-	}
-
-	FuncSpec struct {
-		BaseSpec
-
-		Arg []*FieldSpec
-		Ret *FieldSpec
-	}
-
-	CompSpec struct {
-		BaseSpec
-
-		Fields []*FieldSpec
 	}
 )
 
@@ -185,25 +160,50 @@ type (
 
 type (
 	Decl interface {
-		Stmt
+		Node
 
 		decl()
 	}
 
-	FuncDecl struct {
-		Tok *lex.Token
-		Env *typ.Env
-		Sym *typ.Type
-		Pkg bool
+	TypeSpec struct {
+		Tok *lex.Token // basic, struct or enum
+		Typ *typ.Type
+	}
 
-		Spec *FuncSpec
+	FieldSpec struct {
+		Tok *lex.Token // name, maybe nil
+		Typ *TypeSpec
+
+		// Field instance (for function arguments).
+		Obj *typ.Object
+
+		// Field index (for struct field).
+		Idx uint8
+	}
+
+	FuncDecl struct {
+		Tok *lex.Token // func
+		Typ *typ.Type
+		Env *typ.Env
+
+		Arg []*FieldSpec
+		Ret *FieldSpec
+
 		Body *BlockStmt
 	}
 
-	CompDecl struct {
-		Tok *lex.Token
+	StructDecl struct {
+		Tok *lex.Token // type
+		Typ *typ.Type
 
-		Spec *CompSpec
+		Fields []*FieldSpec
+	}
+
+	EnumDecl struct {
+		Tok *lex.Token // enum
+		Typ *typ.Type
+
+		Members []*lex.Token
 	}
 )
 

@@ -1,3 +1,4 @@
+// Package lex contains language tokenizer.
 package lex
 
 import (
@@ -5,13 +6,16 @@ import (
 	"unicode"
 )
 
+// Scanner is a source code tokenizer.
+//
+// Encountered errors stored in Err slice so that they
+// can be used later in case of fatal in the following stages.
 type Scanner struct {
 	Err []error
 
 	buf []rune
 	row int
 	col int
-
 	prv *Token
 }
 
@@ -21,6 +25,10 @@ func (s *Scanner) Load(buf []rune) {
 	s.col = 1
 }
 
+// Next returns the next token.
+//
+// In case of an error, returns the next correct
+// token (or EOF, if no such left).
 func (s *Scanner) Next() *Token {
 	s.skip()
 
@@ -40,6 +48,10 @@ func (s *Scanner) Next() *Token {
 
 	if unicode.IsLetter(s.buf[0]) {
 		return s.nextIdf(t)
+	}
+
+	if s.buf[0] == '"' {
+		return s.nextStr(t)
 	}
 
 	t.Lit = string(s.buf[0:1])
@@ -82,9 +94,12 @@ func (s *Scanner) Next() *Token {
 	case '*':
 		t.TokenType = MUL
 
-		if len(s.buf) > 1 && s.buf[1] == '*' {
-			t.TokenType = POW
-			t.Lit = string(s.buf[0:2])
+		if len(s.buf) > 1 {
+			switch s.buf[1] {
+			case '*':
+				t.TokenType = POW
+				t.Lit = string(s.buf[0:2])
+			}
 		}
 	case '/':
 		t.TokenType = DIV
@@ -101,8 +116,6 @@ func (s *Scanner) Next() *Token {
 				t.Lit = string(s.buf[0:2])
 			}
 		}
-
-		break
 	case '>':
 		t.TokenType = GT
 
@@ -116,8 +129,6 @@ func (s *Scanner) Next() *Token {
 				t.Lit = string(s.buf[0:2])
 			}
 		}
-
-		break
 	case '%':
 		t.TokenType = MOD
 	case '&':
@@ -177,7 +188,7 @@ func (s *Scanner) Next() *Token {
 }
 
 func (s *Scanner) error(err error) {
-	s.Err = append(s.Err, fmt.Errorf("scanner: %d:%d: %w", s.row, s.col, err))
+	s.Err = append(s.Err, fmt.Errorf("scanner: [ %3d:%3d ] %w", s.row, s.col, err))
 }
 
 func (s *Scanner) skip() {
@@ -198,14 +209,38 @@ func (s *Scanner) nextNum(t *Token) *Token {
 
 	t.TokenType = II64
 
-	for unicode.IsDigit(s.buf[cur]) {
+	for len(s.buf) > cur && unicode.IsDigit(s.buf[cur]) {
 		cur += 1
 	}
 
-	if unicode.IsLetter(s.buf[cur]) && s.buf[cur] != 'u' {
+	if len(s.buf) > cur {
+		switch s.buf[cur] {
+		case 'u':
+			t.TokenType = IU64
+			cur += 1
+		case '.':
+			t.TokenType = IF64
+			cur += 1
+
+			if len(s.buf) <= cur || !unicode.IsDigit(s.buf[cur]) {
+				s.error(fmt.Errorf("malformed numeric literal"))
+
+				s.col += cur
+				s.buf = s.buf[cur:]
+
+				return s.Next()
+			}
+
+			for len(s.buf) > cur && unicode.IsDigit(s.buf[cur]) {
+				cur += 1
+			}
+		}
+	}
+
+	if len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) || s.buf[cur] == '.') {
 		s.error(fmt.Errorf("malformed numeric literal"))
 
-		for unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
+		for len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur])) {
 			cur += 1
 		}
 
@@ -215,49 +250,12 @@ func (s *Scanner) nextNum(t *Token) *Token {
 		return s.Next()
 	}
 
-	if s.buf[cur] == 'u' {
-		t.TokenType = IU64
-
-		cur += 1
-
-		if unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
-			s.error(fmt.Errorf("malformed numeric literal"))
-
-			for unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
-				cur += 1
-			}
-
-			s.col += cur
-			s.buf = s.buf[cur:]
-
-			return s.Next()
-		}
+	if t.TokenType == U64 {
+		t.Lit = string(s.buf[:cur-1])
+	} else {
+		t.Lit = string(s.buf[:cur])
 	}
 
-	if s.buf[cur] == '.' {
-		t.TokenType = IF64
-
-		cur += 1
-
-		for unicode.IsDigit(s.buf[cur]) {
-			cur += 1
-		}
-
-		if unicode.IsLetter(s.buf[cur]) {
-			s.error(fmt.Errorf("malformed numeric literal"))
-
-			for unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
-				cur += 1
-			}
-
-			s.col += cur
-			s.buf = s.buf[cur:]
-
-			return s.Next()
-		}
-	}
-
-	t.Lit = string(s.buf[:cur])
 	s.prv = t
 	s.col += cur
 	s.buf = s.buf[cur:]
@@ -267,12 +265,16 @@ func (s *Scanner) nextNum(t *Token) *Token {
 
 func (s *Scanner) nextIdf(t *Token) *Token {
 	cur := 1
+	t.TokenType = IDF
 
-	for unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) {
+	if unicode.IsUpper(s.buf[0]) {
+		t.TokenType = IMEM
+	}
+
+	for len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur])) {
 		cur += 1
 	}
 
-	t.TokenType = IDF
 	t.Lit = string(s.buf[:cur])
 	s.prv = t
 	s.col += cur
@@ -281,6 +283,35 @@ func (s *Scanner) nextIdf(t *Token) *Token {
 	if tt, ok := AsKeyword(t.Lit); ok {
 		t.TokenType = tt
 	}
+
+	return t
+}
+
+func (s *Scanner) nextStr(t *Token) *Token {
+	cur := 1
+
+	for len(s.buf) > cur {
+		if s.buf[cur] == '"' && s.buf[cur-1] != '\\' {
+			break
+		}
+
+		cur += 1
+	}
+
+	if len(s.buf) <= cur || s.buf[cur] != '"' {
+		s.error(fmt.Errorf("malformed string literal"))
+
+		s.col += cur
+		s.buf = s.buf[cur:]
+
+		return s.Next()
+	}
+
+	t.TokenType = STR
+	t.Lit = string(s.buf[1:cur])
+	s.prv = t
+	s.col += cur + 1
+	s.buf = s.buf[cur+1:]
 
 	return t
 }

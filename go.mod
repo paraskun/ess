@@ -1,4 +1,4 @@
-module github.com/paraskun/ess-go
+module github.com/paraskun/x
 
 go 1.24.1
 

@@ -1,6 +1,6 @@
 package sir
 
-import "github.com/paraskun/ess-go/typ"
+import "github.com/paraskun/x/typ"
 
 type Op uint8
 

@@ -7,10 +7,13 @@ const (
 
 	// Literals
 
-	IDF  // identifier
+	IDF // identifier
+
 	II64 // 102
 	IU64 // 102u
 	IF64 // 102.0
+	ISTR // "hi!"
+	IMEM // enum member (uppercase identifier)
 
 	// Punctuation
 
@@ -68,8 +71,10 @@ const (
 	I64
 	U64
 	F64
+	STR
 	BOOL
 	TYPE
+	ENUM
 	FUNC
 	FOR
 	IF
@@ -78,7 +83,6 @@ const (
 	BREAK
 	TRUE
 	FALSE
-	PREV
 )
 
 type Token struct {
@@ -94,8 +98,10 @@ var kwd = map[string]TokenType{
 	"i64":    I64,
 	"u64":    U64,
 	"f64":    F64,
+	"str":    STR,
 	"bool":   BOOL,
 	"type":   TYPE,
+	"enum":   ENUM,
 	"func":   FUNC,
 	"for":    FOR,
 	"if":     IF,
@@ -104,7 +110,6 @@ var kwd = map[string]TokenType{
 	"break":  BREAK,
 	"true":   TRUE,
 	"false":  FALSE,
-	"prev":   PREV,
 }
 
 func AsKeyword(lit string) (TokenType, bool) {
@@ -157,6 +162,7 @@ var dbg = map[TokenType]string{
 	F64:   "\"f64\"",
 	BOOL:  "\"bool\"",
 	TYPE:  "\"type\"",
+	ENUM:  "\"enum\"",
 	FUNC:  "\"func\"",
 	FOR:   "\"for\"",
 	IF:    "\"if\"",
@@ -165,7 +171,6 @@ var dbg = map[TokenType]string{
 	BREAK: "\"break\"",
 	TRUE:  "\"true\"",
 	FALSE: "\"false\"",
-	PREV:  "\"prev\"",
 }
 
 func (t TokenType) String() string {

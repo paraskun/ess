@@ -1,3 +1,4 @@
+// Package typ describes language type system.
 package typ
 
 import "fmt"
@@ -5,70 +6,107 @@ import "fmt"
 type Kind byte
 
 const (
-	ANY  Kind = 0b00000000
-	FUNC      = 0b00100000
-	COMP      = 0b01000000
-	BOOL      = 0b01100000
-	I64       = 0b10000000
-	U64       = 0b10100000
-	F64       = 0b11000000
-	STR       = 0b11100000
+	// Basic
+
+	// Basic type must occupy three bits in
+	// order to fit into opcode representation.
+	// It means, we can have at most eight
+	// basic data types.
+
+	Bool Kind = iota
+	I64
+	U64
+	F64
+	Str
+
+	// Internal
+
+	// This types are internal because they are
+	// taking place only during compilation.
+
+	// *Any* type can be used only as a type of
+	// an argument to native functions.
+
+	Any
+	Ref
+	Func
+	Enum
+	Struct
+	Void
 )
 
 type (
+	// Type is a collection of invariant properties
+	// associated with each object.
 	Type struct {
 		Kind Kind
 
-		// Composite type info.
+		// Complex type info.
 		//
-		// 	- FUNC -> *FuncType
-		//	- COMP -> *CompType
+		// Ref 		-> *Type
+		// Func 	-> *FuncInfo
+		// Enum 	-> *EnumInfo
+		// Struct -> *StructInfo
 		Info any
 	}
 
+	// Field is a named or unnamed member
+	// of some logical group.
 	Field struct {
 		Name string // maybe empty
-
-		// Typ is a fields type.
-		Typ *Type
+		Typ  *Type  // field type
 
 		// Off is an offset in bytes within
-		// the surrounding object.
+		// logical group.
 		Off int
+
+		// Field index (for structures)
+		Idx uint8
 	}
 
 	FuncInfo struct {
-		Arg []*Field
-		Ret *Field
-
-		Off int
-		Nat bool
+		Arg []*Field // arguments
+		Ret *Field   // return
 	}
 
-	CompInfo struct {
+	EnumInfo struct {
+		Members map[string]uint8
+	}
+
+	StructInfo struct {
 		Fields map[string]*Field
 	}
 )
 
+// Size returns how much bytes occupies object
+// of that type bypassing all references.
 func (t *Type) Size() (r int) {
 	switch t.Kind {
-	case BOOL:
+	case Bool:
 		return 1
 	case I64, U64, F64:
 		return 8
-	case FUNC:
+	case Ref:
+		return t.Info.(*Type).Size()
+	case Func:
 		return 4
-	case COMP:
-		for _, f := range t.Info.(*CompInfo).Fields {
+	case Enum:
+		return 1
+	case Struct:
+		for _, f := range t.Info.(*StructInfo).Fields {
 			r += f.Typ.Size()
 		}
+	case Void:
+		return 0
 	}
 
 	return r
 }
 
+// Equal checks if two types are compatible
+// to each other.
 func (t *Type) Equal(o *Type) bool {
-	if o == nil {
+	if t == nil || o == nil {
 		return false
 	}
 
@@ -76,20 +114,22 @@ func (t *Type) Equal(o *Type) bool {
 		return false
 	}
 
-	if t.Kind == ANY {
+	if t.Kind == Any {
 		return false
 	}
 
 	switch t.Kind {
-	case FUNC:
+	case Func:
 		return t.Info.(*FuncInfo).Equal(o.Info.(*FuncInfo))
-	case COMP:
+	case Struct:
 		return t == o
 	}
 
 	return true
 }
 
+// Equal checks whether two functions compatible
+// to each other by their signatures.
 func (t *FuncInfo) Equal(o *FuncInfo) bool {
 	if len(t.Arg) != len(o.Arg) {
 		return false
@@ -101,10 +141,6 @@ func (t *FuncInfo) Equal(o *FuncInfo) bool {
 		}
 	}
 
-	if (t.Ret == nil && o.Ret != nil) || (t.Ret != nil && o.Ret == nil) {
-		return false
-	}
-
 	if !t.Ret.Typ.Equal(o.Ret.Typ) {
 		return false
 	}
@@ -113,59 +149,29 @@ func (t *FuncInfo) Equal(o *FuncInfo) bool {
 }
 
 var (
-	AnyType = Type{
-		Kind: ANY,
-	}
-
-	BoolType = Type{
-		Kind: BOOL,
-	}
-
-	Sig64Type = Type{
-		Kind: I64,
-	}
-
-	Uns64Type = Type{
-		Kind: U64,
-	}
-
-	Flt64Type = Type{
-		Kind: F64,
-	}
-
-	LogType = Type{
-		Kind: FUNC,
-		Info: &FuncInfo{
-			Arg: []*Field{
-				{
-					Typ: &AnyType,
-					Off: 0,
-				},
-			},
-			Ret: nil,
-			Nat: true,
-			Off: -1,
-		},
-	}
+	AnyType   = Type{Kind: Any}
+	VoidType  = Type{Kind: Void}
+	BoolType  = Type{Kind: Bool}
+	Sig64Type = Type{Kind: I64}
+	Uns64Type = Type{Kind: U64}
+	Flt64Type = Type{Kind: F64}
 )
 
-// Object is a local variable or literal.
+// Object is a typed entity.
+// It can be local variable, literal (constant)
+// or function.
 type Object struct {
-	// Typ is an objects type.
 	Typ *Type
 
-	// Ref indicates whether object stored
-	// directly or by reference pointer.
-	Ref bool
-
-	// Val contains constant values
-	// infered at compile time.
+	// Val contains constant value infered
+	// at compile time.
 	//
-	//	- COMP -> nil
-	//  - BOOL -> bool
-	//  - I64 -> int64
-	//  - U64 -> uint64
-	//  - F64 -> float64
+	// Struct -> nil
+	// Enum 	-> uint8
+	// Bool 	-> bool
+	// I64 		-> int64
+	// U64 		-> uint64
+	// F64 		-> float64
 	Val any
 
 	// Off contains offset in bytes inside
@@ -173,57 +179,41 @@ type Object struct {
 	Off int
 }
 
+// Size returns how much bytes object occupies.
 func (o *Object) Size() int {
-	if o.Ref {
+	// For objects that passed by reference
+	// we have to store only base address.
+	if o.Typ.Kind == Ref {
 		return 8
 	}
 
 	return o.Typ.Size()
 }
 
-// Env is an environment associate with a block.
+// Env is an information storage.
+//
+// Environment localizes information derived
+// from part of source code it has beed attached.
+//
+// For local variables environment determines
+// usage scope.
 type Env struct {
 	Parent *Env
 
-	// Root is a reference to nearest parenting
-	// environment associated with a function.
-	Root *Env
-
-	// ImmSz indicates imm block size in bytes.
-	ImmSz int
-
-	// Imm table contains immediate objects
-	// (literals) used in associated function.
-	Imm map[string]*Object
-
-	// Obj table contains local variables
-	// defined in associated block.
-	Obj map[string]*Object
-
-	// Sym table contains type declarations.
-	Sym map[string]*Type
-
-	// Fun table contains function declarations.
-	Fun map[string]*Type
+	// Sym is a symbol table for current environment.
+	Sym map[string]*Object
 }
 
 func NewEnv(p *Env) *Env {
 	e := &Env{
 		Parent: p,
-		Imm:    make(map[string]*Object),
-		Obj:    make(map[string]*Object),
-		Sym:    make(map[string]*Type),
-		Fun:    make(map[string]*Type),
-	}
-
-	if p != nil {
-		e.Root = p.Root
+		Sym:    make(map[string]*Object),
 	}
 
 	return e
 }
 
-func (e *Env) InsertSym(name string, sym *Type) error {
+func (e *Env) InsertSym(name string, sym *Object) error {
 	if _, ok := e.Sym[name]; ok {
 		return fmt.Errorf("\"%s\" already defined in current environment", name)
 	}
@@ -233,82 +223,13 @@ func (e *Env) InsertSym(name string, sym *Type) error {
 	return nil
 }
 
-func (e *Env) LookupSym(name string) (*Type, int) {
+func (e *Env) LookupSym(name string) (*Object, int) {
 	env := e
 	lvl := 0
 
 	for env != nil {
 		if sym, ok := env.Sym[name]; ok {
 			return sym, lvl
-		}
-
-		lvl += 1
-		env = env.Parent
-	}
-
-	return nil, lvl
-}
-
-func (e *Env) InsertFun(name string, fun *Type) error {
-	if _, ok := e.Fun[name]; ok {
-		return fmt.Errorf("\"%s\" already defined in current environment", name)
-	}
-
-	e.Fun[name] = fun
-
-	return nil
-}
-
-func (e *Env) LookupFun(name string) (*Type, int) {
-	env := e
-	lvl := 0
-
-	for env != nil {
-		if fun, ok := env.Fun[name]; ok {
-			return fun, lvl
-		}
-
-		lvl += 1
-		env = env.Parent
-	}
-
-	return nil, lvl
-}
-
-func (e *Env) InsertImm(lit string, imm *Object) {
-	if _, ok := e.Root.Imm[lit]; ok {
-		return
-	}
-
-	e.Root.Imm[lit] = imm
-	e.Root.ImmSz += imm.Size()
-}
-
-func (e *Env) LookupImm(lit string) *Object {
-	return e.Root.Imm[lit]
-}
-
-func (e *Env) InsertObj(name string, obj *Object) error {
-	if _, ok := e.Obj[name]; ok {
-		return fmt.Errorf("\"%s\" already defined in current environment", name)
-	}
-
-	e.Obj[name] = obj
-
-	return nil
-}
-
-func (e *Env) LookupObj(name string) (*Object, int) {
-	env := e
-	lvl := 0
-
-	for env != nil {
-		if obj, ok := env.Obj[name]; ok {
-			return obj, lvl
-		}
-
-		if env == e.Root {
-			break
 		}
 
 		lvl += 1
