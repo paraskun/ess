@@ -165,8 +165,10 @@ type (
 		decl()
 	}
 
+	// TypeSpec is a node for basic, struct or
+	// enum type reference.
 	TypeSpec struct {
-		Tok *lex.Token // basic, struct or enum
+		Tok *lex.Token
 		Typ *typ.Type
 	}
 
