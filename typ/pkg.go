@@ -1,11 +1,17 @@
 package typ
 
-type Package struct {
-	Name  string
-	Usage map[string]*Package
+type File struct {
+	Name string // ast.x
+
+	Env *Env
+	Pkg *Package
+	Use []*Package
 }
 
-// Native is package written in Go.
-type Native struct {
-	Package
+type Package struct {
+	Path string // ast
+}
+
+type Module struct {
+	Name string // github.com/paraskun/x
 }

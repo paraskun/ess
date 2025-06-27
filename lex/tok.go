@@ -67,6 +67,7 @@ const (
 
 	// Keywords
 
+	USE
 	VAR
 	I64
 	U64
@@ -94,6 +95,7 @@ type Token struct {
 }
 
 var kwd = map[string]TokenType{
+	"use":    USE,
 	"var":    VAR,
 	"i64":    I64,
 	"u64":    U64,

@@ -23,7 +23,7 @@ const (
 	// This types are internal because they are
 	// taking place only during compilation.
 
-	// *Any* type can be used only as a type of
+	// Type Any can be used only as a type of
 	// an argument to native functions.
 
 	Any
