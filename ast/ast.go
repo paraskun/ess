@@ -165,6 +165,11 @@ type (
 		decl()
 	}
 
+	UseDecl struct {
+		Tok *lex.Token // use
+		Pkg *lex.Token
+	}
+
 	// TypeSpec is a node for basic, struct or
 	// enum type specification.
 	TypeSpec struct {

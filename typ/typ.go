@@ -28,10 +28,12 @@ const (
 
 	Any
 	Ref
+	Arr
+
+	Void
 	Func
 	Enum
 	Struct
-	Void
 )
 
 type (
@@ -41,12 +43,12 @@ type (
 		Kind Kind
 
 		// Complex type info.
-		//
-		// Ref 		-> *Type
-		// Func 	-> *FuncInfo
-		// Enum 	-> *EnumInfo
-		// Struct -> *StructInfo
 		Info any
+	}
+
+	ArrInfo struct {
+		Typ *Type
+		Len int
 	}
 
 	// Field is a named or unnamed member
@@ -59,7 +61,7 @@ type (
 		// logical group.
 		Off int
 
-		// Field index (for structures)
+		// Field index (for structures).
 		Idx uint8
 	}
 
@@ -111,6 +113,8 @@ func (t *Type) Equal(o *Type) bool {
 
 	return t == o
 }
+
+// Predefined data types
 
 var (
 	AnyType   = Type{Kind: Any}

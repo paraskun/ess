@@ -3,25 +3,8 @@ package typ
 import "fmt"
 
 // Object is a typed entity.
-// It can be local variable, literal (constant)
-// or function.
 type Object struct {
 	Typ *Type
-
-	// Val contains constant value infered
-	// at compile time.
-	//
-	// Struct -> nil
-	// Enum 	-> uint8
-	// Bool 	-> bool
-	// I64 		-> int64
-	// U64 		-> uint64
-	// F64 		-> float64
-	Val any
-
-	// Off contains offset in bytes inside
-	// parenting environment.
-	Off int
 }
 
 // Size returns how much bytes object occupies.

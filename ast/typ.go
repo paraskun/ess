@@ -3,8 +3,8 @@ package ast
 import (
 	"strconv"
 
-	"github.com/paraskun/ess-go/lex"
-	"github.com/paraskun/ess-go/typ"
+	"github.com/paraskun/x/lex"
+	"github.com/paraskun/x/typ"
 )
 
 type typer struct {
