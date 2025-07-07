@@ -69,6 +69,7 @@ const (
 
 	USE
 	VAR
+	LET
 	I64
 	U64
 	F64

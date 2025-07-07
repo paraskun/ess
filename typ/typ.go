@@ -12,11 +12,11 @@ const (
 	// It means, we can have at most eight
 	// basic data types.
 
-	Bool Kind = iota
+	BOOL Kind = iota
 	I64
 	U64
 	F64
-	Str
+	STR
 
 	// Internal
 
@@ -26,14 +26,15 @@ const (
 	// Type Any can be used only as a type of
 	// an argument to native functions.
 
-	Any
-	Ref
-	Arr
+	PKG
+	ANY
+	REF
 
-	Void
-	Func
-	Enum
-	Struct
+	VOID
+	FUNC
+	ENUM
+	ARRAY
+	STRUCT
 )
 
 type (
@@ -42,40 +43,44 @@ type (
 	Type struct {
 		Kind Kind
 
-		// Complex type info.
-		Info any
-	}
-
-	ArrInfo struct {
-		Typ *Type
-		Len int
+		// PKG 		-> *Package
+		// REF 		-> *Type
+		// FUNC 	-> *Func
+		// ENUM 	-> *Enum
+		// ARRAY 	-> *Array
+		// STRUCT -> *Struct
+		Extra any
 	}
 
 	// Field is a named or unnamed member
 	// of some logical group.
 	Field struct {
 		Name string // maybe empty
-		Typ  *Type  // field type
-
-		// Off is an offset in bytes within
-		// logical group.
-		Off int
-
-		// Field index (for structures).
-		Idx uint8
+		Typ  *Type
 	}
 
-	FuncInfo struct {
-		Arg []*Field // arguments
-		Ret *Field   // return
+	Func struct {
+		Arg []*Field
+		Ret []*Field
+
+		Dec any // *ast.FuncDecl
 	}
 
-	EnumInfo struct {
+	Enum struct {
 		Members map[string]uint8
+
+		Dec any // *ast.EnumDecl
 	}
 
-	StructInfo struct {
+	Array struct {
+		Typ *Type // array member type
+		Cap int
+	}
+
+	Struct struct {
 		Fields map[string]*Field
+
+		Dec any // *ast.StructDecl
 	}
 )
 
@@ -83,21 +88,21 @@ type (
 // of that type bypassing all references.
 func (t *Type) Size() (r int) {
 	switch t.Kind {
-	case Bool:
+	case BOOL:
 		return 1
 	case I64, U64, F64:
 		return 8
-	case Ref:
-		return t.Info.(*Type).Size()
-	case Func:
+	case REF:
+		return t.Extra.(*Type).Size()
+	case FUNC:
 		return 4
-	case Enum:
+	case ENUM:
 		return 1
-	case Struct:
-		for _, f := range t.Info.(*StructInfo).Fields {
+	case STRUCT:
+		for _, f := range t.Extra.(*Struct).Fields {
 			r += f.Typ.Size()
 		}
-	case Void:
+	case VOID:
 		return 0
 	}
 
@@ -117,9 +122,9 @@ func (t *Type) Equal(o *Type) bool {
 // Predefined data types
 
 var (
-	AnyType   = Type{Kind: Any}
-	VoidType  = Type{Kind: Void}
-	BoolType  = Type{Kind: Bool}
+	AnyType   = Type{Kind: ANY}
+	VoidType  = Type{Kind: VOID}
+	BoolType  = Type{Kind: BOOL}
 	Sig64Type = Type{Kind: I64}
 	Uns64Type = Type{Kind: U64}
 	Flt64Type = Type{Kind: F64}

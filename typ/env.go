@@ -2,7 +2,10 @@ package typ
 
 import "fmt"
 
-// Object is a typed entity.
+// Object is a named unique typed program entity.
+//
+// Multiple entities can share the same Type, but
+// each can only have one attached Object.
 type Object struct {
 	Typ *Type
 }
@@ -11,20 +14,17 @@ type Object struct {
 func (o *Object) Size() int {
 	// For objects that passed by reference
 	// we have to store only base address.
-	if o.Typ.Kind == Ref {
+	if o.Typ.Kind == REF {
 		return 8
 	}
 
 	return o.Typ.Size()
 }
 
-// Env is an information storage.
+// Env is an Object storage.
 //
 // Environment localizes information derived
 // from part of source code it has beed attached.
-//
-// For local variables environment determines
-// usage scope.
 type Env struct {
 	Parent *Env
 
@@ -41,9 +41,9 @@ func NewEnv(p *Env) *Env {
 	return e
 }
 
-func (e *Env) InsertSym(name string, sym *Object) error {
+func (e *Env) Insert(name string, sym *Object) error {
 	if _, ok := e.Sym[name]; ok {
-		return fmt.Errorf("\"%s\" already defined in current environment", name)
+		return fmt.Errorf("\"%s\" already defined in the current environment", name)
 	}
 
 	e.Sym[name] = sym
@@ -51,7 +51,7 @@ func (e *Env) InsertSym(name string, sym *Object) error {
 	return nil
 }
 
-func (e *Env) LookupSym(name string) (*Object, int) {
+func (e *Env) Lookup(name string) (*Object, int) {
 	env := e
 	lvl := 0
 
