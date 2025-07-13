@@ -8,57 +8,143 @@ import (
 )
 
 type typer struct {
-	curEnv *typ.Env
-	curInf *typ.FuncInfo
-	funNum int
+	env *typ.Env
+	fun *typ.Func
 }
 
-func Typeset(p *Package) {
-	p.Env = typ.NewEnv(nil)
+func Typeset(pkg *typ.Package) {
+	pkg.Env = typ.NewEnv(nil)
+	typ := typer{env: pkg.Env}
 
-	p.Env.InsertFun("log", &typ.LogType)
+	for _, src := range pkg.XSrc {
+		src.Env = pkg.Env
 
-	t := typer{
-		curEnv: p.Env,
-	}
-
-	for _, d := range p.Dec {
-		d.Accept(&t)
+		for _, dec := range src.Dec.(*File).Dec {
+			dec.Accept(&typ)
+		}
 	}
 }
 
 func (t *typer) VisitDecl(u Decl) {
 	switch d := u.(type) {
+	case *UseDecl:
+		t.visitUseDecl(d)
+	case *VarDecl:
+		t.visitVarDecl(d)
 	case *FuncDecl:
 		t.visitFuncDecl(d)
-	case *CompDecl:
-		t.visitCompDecl(d)
+	case *StructDecl:
+		t.visitStructDecl(d)
+	case *EnumDecl:
+		t.visitEnumDecl(d)
+	}
+}
+
+func (t *typer) visitUseDecl(d *UseDecl) {
+	if d.Pkg == nil {
+		return
+	}
+
+	if err := t.env.Insert(d.Pkg.Name, &typ.Object{
+		Typ: &typ.Type{
+			Kind:  typ.PKG,
+			Extra: d.Pkg,
+		},
+	}); err != nil {
+		panic(err)
+	}
+
+	Typeset(d.Pkg)
+}
+
+func (t *typer) visitVarDecl(d *VarDecl) {
+	d.Ini.Accept(t)
+
+	if err := t.env.Insert(d.Idf.Lit, &typ.Object{
+		Typ: d.Ini.Type(),
+		Val: d.Ini.(*ImmExpr).Obj.Val, // TODO: expression evaluation
+	}); err != nil {
+		panic(err)
 	}
 }
 
 func (t *typer) visitFuncDecl(d *FuncDecl) {
-	d.Env = typ.NewEnv(t.curEnv)
-	d.Env.Root = d.Env
-	t.curEnv = d.Env
-
-	t.visitTypeSpec(d.Spec, true)
-
-	t.curInf = d.Spec.Type().Info.(*typ.FuncInfo)
-	t.curInf.Off = t.funNum
+	d.Env = typ.NewEnv(t.env)
+	t.env = d.Env
+	t.fun = t.funcSpec(d)
 
 	d.Body.Accept(t)
 
-	t.curInf = nil
-	t.curEnv = d.Env.Parent
-
-	if err := t.curEnv.InsertFun(d.Tok.Lit, d.Spec.Type()); err != nil {
+	if err := t.env.Insert(d.Idf.Lit, &typ.Object{
+		Typ: &typ.Type{
+			Kind:  typ.FUNC,
+			Extra: t.fun,
+		},
+	}); err != nil {
 		panic(err)
 	}
 
-	t.funNum += 1
+	t.fun = nil
+	t.env = d.Env.Parent
 }
 
-func (t *typer) visitCompDecl(d *CompDecl) {
+func (t *typer) funcSpec(d *FuncDecl) *typ.Func {
+	fun := &typ.Func{}
+
+	for _, arg := range d.Arg {
+		t.typeSpec(arg.Typ)
+
+		obj := &typ.Object{
+			Typ: arg.Typ.Typ,
+		}
+
+		if err := t.env.Insert(arg.Tok.Lit, obj); err != nil {
+			panic(err)
+		}
+
+		fun.Arg = append(fun.Arg, &typ.Field{
+			Name: arg.Tok.Lit,
+			Typ:  obj.Typ,
+		})
+	}
+
+	for _, ret := range d.Ret {
+		t.typeSpec(ret.Typ)
+
+		fun.Ret = append(fun.Ret, &typ.Field{
+			Typ: ret.Typ.Typ,
+		})
+	}
+
+	return fun
+}
+
+func (t *typer) typeSpec(s *TypeSpec) {
+	switch s.Tok.TokenType {
+	case lex.BOOL:
+		s.Typ = &typ.BoolType
+	case lex.I64:
+		s.Typ = &typ.Sig64Type
+	case lex.U64:
+		s.Typ = &typ.Uns64Type
+	case lex.F64:
+		s.Typ = &typ.Flt64Type
+	case lex.IDF:
+		sym, _ := t.env.Lookup(s.Tok.Lit)
+
+		if sym == nil {
+			panic("undeclared type")
+		}
+
+		if sym.Typ.Kind != typ.ENUM && sym.Typ.Kind != typ.STRUCT {
+			panic("type specification expected")
+		}
+
+		s.Typ = sym.Typ
+	}
+}
+
+func (t *typer) visitStructDecl(d *StructDecl) {
 	t.visitTypeSpec(d.Spec, false)
 
 	if err := t.curEnv.InsertSym(d.Tok.Lit, d.Spec.Type()); err != nil {
@@ -78,83 +164,9 @@ func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
 }
 
 func (t *typer) visitBaseSpec(s *BaseSpec) {
-	switch s.Tok.TokenType {
-	case lex.BOOL:
-		s.Typ = &typ.BoolType
-	case lex.I64:
-		s.Typ = &typ.Sig64Type
-	case lex.U64:
-		s.Typ = &typ.Uns64Type
-	case lex.F64:
-		s.Typ = &typ.Flt64Type
-	case lex.IDF:
-		sym, _ := t.curEnv.LookupSym(s.Tok.Lit)
-
-		if sym == nil {
-			panic("undeclared type")
-		}
-
-		s.Typ = sym
-	}
 }
 
 func (t *typer) visitFuncSpec(s *FuncSpec, env bool) {
-	inf := typ.FuncInfo{}
-	off := 0
-
-	for _, arg := range s.Arg {
-		t.visitTypeSpec(arg.Typ, false)
-
-		if env {
-			arg.Obj = &typ.Object{
-				Typ: arg.Typ.Type(),
-				Off: -1,
-			}
-
-			if arg.Typ.Type().Kind == typ.COMP {
-				arg.Obj.Ref = true
-			}
-
-			if err := t.curEnv.InsertObj(arg.Tok.Lit, arg.Obj); err != nil {
-				panic(err)
-			}
-		}
-
-		inf.Arg = append(inf.Arg, &typ.Field{
-			Name: arg.Tok.Lit,
-			Typ:  arg.Typ.Type(),
-			Off:  off,
-		})
-
-		off += arg.Typ.Type().Size()
-	}
-
-	if s.Ret != nil {
-		t.visitTypeSpec(s.Ret.Typ, false)
-
-		f := typ.Field{
-			Typ: s.Ret.Typ.Type(),
-			Off: 0,
-		}
-
-		if env && s.Ret.Tok != nil {
-			if err := t.curEnv.InsertObj(s.Ret.Tok.Lit, &typ.Object{
-				Typ: s.Ret.Typ.Type(),
-				Off: -1,
-			}); err != nil {
-				panic(err)
-			}
-
-			f.Name = s.Ret.Tok.Lit
-		}
-
-		inf.Ret = &f
-	}
-
-	s.Typ = &typ.Type{
-		Kind: typ.FUNC,
-		Info: &inf,
-	}
 }
 
 func (t *typer) visitCompSpec(s *CompSpec) {

@@ -8,6 +8,7 @@ import "fmt"
 // each can only have one attached Object.
 type Object struct {
 	Typ *Type
+	Val any
 }
 
 // Size returns how much bytes object occupies.
@@ -28,8 +29,7 @@ func (o *Object) Size() int {
 type Env struct {
 	Parent *Env
 
-	// Sym is a symbol table for current environment.
-	Sym map[string]*Object
+	Sym map[string]*Object // symbol table
 }
 
 func NewEnv(p *Env) *Env {

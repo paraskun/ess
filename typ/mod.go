@@ -56,6 +56,18 @@ type Package struct {
 	// Typing pass
 
 	Env *Env
+	Imm map[string]*Object
+}
+
+func (pkg *Package) Insert(lit string, typ *Type) *Object {
+	obj, ok := pkg.Imm[lit]
+
+	if !ok {
+		obj = &Object{typ, nil}
+		pkg.Imm[lit] = obj
+	}
+
+	return obj
 }
 
 type File struct {

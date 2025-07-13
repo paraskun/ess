@@ -200,7 +200,8 @@ type (
 
 	UseDecl struct {
 		Tok *lex.Token // 'use'
-		Pkg *lex.Token
+		Idf *lex.Token
+		Pkg *typ.Package
 
 		// Typing pass
 
@@ -211,8 +212,8 @@ type (
 		*VarStmt
 	}
 
-	// TypeSpec is a node for basic, struct or
-	// enum type specification.
+	// TypeSpec is a node for basic, struct
+	// or enum specification.
 	TypeSpec struct {
 		Tok *lex.Token
 
@@ -223,15 +224,15 @@ type (
 
 	Field struct {
 		Tok *lex.Token // name, maybe nil
-		Idx uint8      // field index (for struct field)
 		Typ *TypeSpec
 	}
 
 	FuncDecl struct {
-		Tok  *lex.Token // 'func'
-		Idf  *lex.Token
-		Arg  []*Field
-		Ret  []*Field
+		Tok *lex.Token // 'func'
+		Idf *lex.Token
+		Arg []*Field
+		Ret []*Field
+
 		Body *BlockStmt
 
 		// Typing pass
@@ -241,9 +242,9 @@ type (
 	}
 
 	StructDecl struct {
-		Tok    *lex.Token // 'type'
-		Idf    *lex.Token
-		Fields []*Field
+		Tok *lex.Token // 'type'
+		Idf *lex.Token // name
+		Mem []*Field   // members
 
 		// Typing pass
 
@@ -251,9 +252,9 @@ type (
 	}
 
 	EnumDecl struct {
-		Tok     *lex.Token // 'enum'
-		Idf     *lex.Token
-		Members []*lex.Token
+		Tok *lex.Token   // 'enum'
+		Idf *lex.Token   // name
+		Mem []*lex.Token // members
 
 		// Typing pass
 
@@ -325,7 +326,7 @@ func (p *parser) peek() *lex.Token {
 
 func (p *parser) must(tt lex.TokenType) *lex.Token {
 	if p.next().TokenType != tt {
-		panic(fmt.Errorf("%v given, but %v musted", p.cur.TokenType, tt))
+		panic(fmt.Errorf("%v given, but %v expected", p.cur.TokenType, tt))
 	}
 
 	return p.cur
@@ -367,6 +368,8 @@ func parse(pkg *typ.Package, ops *options) {
 				dec = append(dec, d)
 			}
 		}
+
+		src.Dec = &File{dec}
 	}
 }
 
@@ -376,12 +379,13 @@ func (p *parser) parseDecl() Decl {
 		u := p.parseUseDecl()
 
 		if p.ops.withDeps {
-			pkg, err := p.pkg.Mod.Lookup(u.Pkg.Lit)
+			pkg, err := p.pkg.Mod.Lookup(u.Idf.Lit)
 
 			if err != nil {
 				panic(err)
 			}
 
+			u.Pkg = pkg
 			parse(pkg, p.ops)
 
 			return u
@@ -411,7 +415,7 @@ func (p *parser) parseDecl() Decl {
 			return e
 		}
 	default:
-		panic("declaration musted")
+		panic("declaration expected")
 	}
 
 	return nil
@@ -420,7 +424,7 @@ func (p *parser) parseDecl() Decl {
 func (p *parser) parseUseDecl() *UseDecl {
 	return &UseDecl{
 		Tok: p.must(lex.USE),
-		Pkg: p.must(lex.ISTR),
+		Idf: p.must(lex.ISTR),
 	}
 }
 
@@ -443,11 +447,16 @@ func (p *parser) parseFuncDecl() *FuncDecl {
 	p.next()
 
 	if p.peek().TokenType == lex.LP {
-		f.Arg = append(f.Arg, p.parseNamedField())
+		f.Ret = append(f.Ret, p.parseUnnamedField())
 
 		if p.peek().TokenType != lex.RP {
 			p.must(lex.COM)
 		}
+	}
+
+	if len(f.Ret) > 1 {
+		// TODO: multiple return values
+		panic("multiple return values are not supported yet")
 	}
 
 	p.next()
@@ -468,7 +477,7 @@ func (p *parser) parseStructDecl() *StructDecl {
 	p.must(lex.LB)
 
 	for p.peek().TokenType != lex.RB {
-		c.Fields = append(c.Fields, p.parseNamedField())
+		c.Mem = append(c.Mem, p.parseNamedField())
 	}
 
 	p.must(lex.RB)
@@ -485,7 +494,7 @@ func (p *parser) parseEnumDecl() *EnumDecl {
 	p.must(lex.LB)
 
 	for p.peek().TokenType != lex.RB {
-		c.Members = append(c.Members, p.must(lex.IMEM))
+		c.Mem = append(c.Mem, p.must(lex.IMEM))
 	}
 
 	p.must(lex.RB)
@@ -512,7 +521,7 @@ func (p *parser) parseTypeSpec() *TypeSpec {
 		return &TypeSpec{Tok: p.next()}
 	}
 
-	panic("type specification musted")
+	panic("type specification expected")
 }
 
 func (p *parser) parseBlockStmt() *BlockStmt {
@@ -579,7 +588,7 @@ func (p *parser) parseStmt() Stmt {
 		return p.parseReturnStmt()
 	}
 
-	panic("statement musted")
+	panic("statement expected")
 }
 
 func (p *parser) parseCall(tok *lex.Token) *CallExpr {
@@ -869,7 +878,7 @@ func (p *parser) parseExpr7() Expr {
 		return r
 	}
 
-	panic("expression musted")
+	panic("expression expected")
 }
 
 func (s *ReturnStmt) Accept(v Visitor) { v.VisitStmt(s) }

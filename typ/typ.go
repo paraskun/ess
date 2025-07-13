@@ -55,8 +55,9 @@ type (
 	// Field is a named or unnamed member
 	// of some logical group.
 	Field struct {
-		Name string // maybe empty
-		Typ  *Type
+		Name string // name, maybe empty
+		Typ  *Type  // type
+		Idx  int    // index (for structs)
 	}
 
 	Func struct {
@@ -67,8 +68,7 @@ type (
 	}
 
 	Enum struct {
-		Members map[string]uint8
-
+		Mem map[string]uint8
 		Dec any // *ast.EnumDecl
 	}
 
@@ -78,8 +78,7 @@ type (
 	}
 
 	Struct struct {
-		Fields map[string]*Field
-
+		Mem map[string]*Field
 		Dec any // *ast.StructDecl
 	}
 )
@@ -99,7 +98,7 @@ func (t *Type) Size() (r int) {
 	case ENUM:
 		return 1
 	case STRUCT:
-		for _, f := range t.Extra.(*Struct).Fields {
+		for _, f := range t.Extra.(*Struct).Mem {
 			r += f.Typ.Size()
 		}
 	case VOID:
