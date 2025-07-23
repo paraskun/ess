@@ -1,13 +1,9 @@
+//go:build ignore
 package ast
 
 import (
 	"bytes"
 	"encoding/binary"
-
-	"github.com/paraskun/ess-go/img"
-	"github.com/paraskun/ess-go/lex"
-	"github.com/paraskun/ess-go/run"
-	"github.com/paraskun/ess-go/typ"
 )
 
 func Assemble(p *Package) *img.Package {

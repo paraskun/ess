@@ -1,13 +1,23 @@
-package typ
+package env
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/paraskun/x/typ"
+)
+
+const (
+	C_ADR = (1 << 0) // addressable
+	C_MOD = (1 << 1) // modifiable
+)
 
 // Object is a named unique typed program entity.
 //
 // Multiple entities can share the same Type, but
 // each can only have one attached Object.
 type Object struct {
-	Typ *Type
+	Typ *typ.Type
+	Cap uint8 // capabilities
 	Val any
 }
 
@@ -15,7 +25,7 @@ type Object struct {
 func (o *Object) Size() int {
 	// For objects that passed by reference
 	// we have to store only base address.
-	if o.Typ.Kind == REF {
+	if o.Typ.Kind == typ.REF {
 		return 8
 	}
 
@@ -32,7 +42,7 @@ type Env struct {
 	Sym map[string]*Object // symbol table
 }
 
-func NewEnv(p *Env) *Env {
+func New(p *Env) *Env {
 	e := &Env{
 		Parent: p,
 		Sym:    make(map[string]*Object),

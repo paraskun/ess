@@ -267,10 +267,6 @@ func (s *Scanner) nextIdf(t *Token) *Token {
 	cur := 1
 	t.TokenType = IDF
 
-	if unicode.IsUpper(s.buf[0]) {
-		t.TokenType = IMEM
-	}
-
 	for len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur])) {
 		cur += 1
 	}

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/paraskun/x/env"
 	"github.com/paraskun/x/lex"
 	"github.com/paraskun/x/typ"
 )
@@ -34,7 +35,7 @@ type (
 
 		// Typing pass
 
-		Env *typ.Env
+		Env *env.Env
 	}
 
 	VarStmt struct {
@@ -69,12 +70,12 @@ type (
 	}
 
 	CallStmt struct {
-		Expr *CallExpr
+		*CallExpr
 	}
 
 	ReturnStmt struct {
 		Tok *lex.Token // 'return'
-		Ret Expr
+		Ret []Expr
 	}
 )
 
@@ -85,6 +86,7 @@ type (
 		Node
 
 		Type() *typ.Type
+		Caps() uint8
 		expr()
 	}
 
@@ -94,7 +96,7 @@ type (
 
 		// Typing pass
 
-		Obj *typ.Object
+		Obj *env.Object
 	}
 
 	StructField struct {
@@ -117,13 +119,13 @@ type (
 
 		// Typing pass
 
-		Obj *typ.Object
+		Obj *env.Object
 	}
 
 	DotExpr struct {
-		Tok   *lex.Token // '.'
-		Scope Expr
-		Field *lex.Token
+		Tok *lex.Token // '.'
+		Env Expr
+		Mem *lex.Token
 
 		// Typing pass
 
@@ -201,11 +203,11 @@ type (
 	UseDecl struct {
 		Tok *lex.Token // 'use'
 		Idf *lex.Token
-		Pkg *typ.Package
+		Pkg *env.Package
 
 		// Typing pass
 
-		Obj *typ.Object
+		Obj *env.Object
 	}
 
 	VarDecl struct {
@@ -237,8 +239,8 @@ type (
 
 		// Typing pass
 
-		Env *typ.Env
-		Obj *typ.Object
+		Env *env.Env
+		Obj *env.Object
 	}
 
 	StructDecl struct {
@@ -248,7 +250,7 @@ type (
 
 		// Typing pass
 
-		Obj *typ.Object
+		Obj *env.Object
 	}
 
 	EnumDecl struct {
@@ -258,7 +260,7 @@ type (
 
 		// Typing pass
 
-		Obj *typ.Object
+		Obj *env.Object
 	}
 )
 
@@ -300,7 +302,7 @@ type parser struct {
 	cur *lex.Token
 
 	ops *options
-	pkg *typ.Package
+	pkg *env.Package
 }
 
 func (p *parser) next() *lex.Token {
@@ -332,7 +334,7 @@ func (p *parser) must(tt lex.TokenType) *lex.Token {
 	return p.cur
 }
 
-func Parse(pkg *typ.Package, opts ...Option) {
+func Parse(pkg *env.Package, opts ...Option) {
 	ops := &options{}
 
 	for _, opt := range opts {
@@ -342,7 +344,7 @@ func Parse(pkg *typ.Package, opts ...Option) {
 	parse(pkg, ops)
 }
 
-func parse(pkg *typ.Package, ops *options) {
+func parse(pkg *env.Package, ops *options) {
 	p := &parser{pkg: pkg, ops: ops}
 
 	for _, src := range pkg.XSrc {
@@ -379,10 +381,10 @@ func (p *parser) parseDecl() Decl {
 		u := p.parseUseDecl()
 
 		if p.ops.withDeps {
-			pkg, err := p.pkg.Mod.Lookup(u.Idf.Lit)
+			pkg := p.pkg.Mod.Lookup(u.Idf.Lit)
 
-			if err != nil {
-				panic(err)
+			if pkg == nil {
+				panic("no such package in context")
 			}
 
 			u.Pkg = pkg
@@ -494,7 +496,7 @@ func (p *parser) parseEnumDecl() *EnumDecl {
 	p.must(lex.LB)
 
 	for p.peek().TokenType != lex.RB {
-		c.Mem = append(c.Mem, p.must(lex.IMEM))
+		c.Mem = append(c.Mem, p.must(lex.IDF))
 	}
 
 	p.must(lex.RB)
@@ -556,9 +558,9 @@ func (p *parser) parseStmt() Stmt {
 			switch p.peek().TokenType {
 			case lex.DOT:
 				cur = &DotExpr{
-					Tok:   p.next(),
-					Scope: cur,
-					Field: p.must(lex.IDF),
+					Tok: p.next(),
+					Env: cur,
+					Mem: p.must(lex.IDF),
 				}
 
 				continue
@@ -662,12 +664,22 @@ func (p *parser) parseCondStmt() *CondStmt {
 }
 
 func (p *parser) parseReturnStmt() *ReturnStmt {
-	r := ReturnStmt{
-		Tok: p.must(lex.RET),
-		Ret: p.parseExpr0(),
+	r := ReturnStmt{Tok: p.must(lex.RET)}
+
+	for p.peek().TokenType != lex.SEM {
+		r.Ret = append(r.Ret, p.parseExpr0())
+
+		if p.peek().TokenType != lex.SEM {
+			p.must(lex.COM)
+		}
 	}
 
 	p.must(lex.SEM)
+
+	if len(r.Ret) > 1 {
+		// TODO: multiple return values
+		panic("multiple return values are not supported yet")
+	}
 
 	return &r
 }
@@ -796,9 +808,9 @@ func (p *parser) parseExpr6() Expr {
 		switch p.peek().TokenType {
 		case lex.DOT:
 			cur = &DotExpr{
-				Tok:   p.next(),
-				Scope: cur,
-				Field: p.must(lex.IDF),
+				Tok: p.next(),
+				Env: cur,
+				Mem: p.must(lex.IDF),
 			}
 
 			continue
@@ -844,7 +856,7 @@ func (p *parser) parseExpr7() Expr {
 		}
 
 		return &IdfExpr{Tok: idf}
-	case lex.II64, lex.IU64, lex.IF64, lex.TRUE, lex.FALSE, lex.IMEM:
+	case lex.II64, lex.IU64, lex.IF64, lex.TRUE, lex.FALSE:
 		return &ImmExpr{Tok: p.next()}
 	case lex.I64:
 		exp := &ToSigExpr{Tok: p.next()}
@@ -920,6 +932,17 @@ func (e *CallExpr) Type() *typ.Type   { return e.RetTyp }
 func (e *ToSigExpr) Type() *typ.Type  { return e.Typ }
 func (e *ToUnsExpr) Type() *typ.Type  { return e.Typ }
 func (e *ToFltExpr) Type() *typ.Type  { return e.Typ }
+
+func (e *ImmExpr) Caps() uint8    { return e.Obj.Cap }
+func (e *StructExpr) Caps() uint8 { return 0 }
+func (e *IdfExpr) Caps() uint8    { return e.Obj.Cap }
+func (e *DotExpr) Caps() uint8    { return e.Env.Caps() }
+func (e *InfExpr) Caps() uint8    { return 0 }
+func (e *PfxExpr) Caps() uint8    { return 0 }
+func (e *CallExpr) Caps() uint8   { return 0 }
+func (e *ToSigExpr) Caps() uint8  { return 0 }
+func (e *ToUnsExpr) Caps() uint8  { return 0 }
+func (e *ToFltExpr) Caps() uint8  { return 0 }
 
 func (*ImmExpr) expr()    {}
 func (*StructExpr) expr() {}

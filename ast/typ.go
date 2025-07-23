@@ -3,18 +3,20 @@ package ast
 import (
 	"strconv"
 
+	"github.com/paraskun/x/env"
 	"github.com/paraskun/x/lex"
 	"github.com/paraskun/x/typ"
 )
 
 type typer struct {
-	env *typ.Env
+	pkg *env.Package
+	env *env.Env
 	fun *typ.Func
 }
 
-func Typeset(pkg *typ.Package) {
-	pkg.Env = typ.NewEnv(nil)
-	typ := typer{env: pkg.Env}
+func Typeset(pkg *env.Package) {
+	pkg.Env = env.New(nil)
+	typ := typer{pkg: pkg, env: pkg.Env}
 
 	for _, src := range pkg.XSrc {
 		src.Env = pkg.Env
@@ -45,14 +47,14 @@ func (t *typer) visitUseDecl(d *UseDecl) {
 		return
 	}
 
-	if err := t.env.Insert(d.Pkg.Name, &typ.Object{
+	// Ignore an error, if multiple files using same package.
+	_ = t.env.Insert(d.Pkg.Name, &env.Object{
+		Cap: env.C_ADR,
 		Typ: &typ.Type{
 			Kind:  typ.PKG,
 			Extra: d.Pkg,
 		},
-	}); err != nil {
-		panic(err)
-	}
+	})
 
 	Typeset(d.Pkg)
 }
@@ -60,7 +62,8 @@ func (t *typer) visitUseDecl(d *UseDecl) {
 func (t *typer) visitVarDecl(d *VarDecl) {
 	d.Ini.Accept(t)
 
-	if err := t.env.Insert(d.Idf.Lit, &typ.Object{
+	if err := t.env.Insert(d.Idf.Lit, &env.Object{
+		Cap: env.C_ADR,
 		Typ: d.Ini.Type(),
 		Val: d.Ini.(*ImmExpr).Obj.Val, // TODO: expression evaluation
 	}); err != nil {
@@ -69,32 +72,38 @@ func (t *typer) visitVarDecl(d *VarDecl) {
 }
 
 func (t *typer) visitFuncDecl(d *FuncDecl) {
-	d.Env = typ.NewEnv(t.env)
-	t.env = d.Env
-	t.fun = t.funcSpec(d)
+	d.Env = env.New(t.env)
+	d.Obj = &env.Object{Typ: t.funcSpec(d)}
 
-	d.Body.Accept(t)
-
-	if err := t.env.Insert(d.Idf.Lit, &typ.Object{
-		Typ: &typ.Type{
-			Kind:  typ.FUNC,
-			Extra: t.fun,
-		},
-	}); err != nil {
+	if err := t.env.Insert(d.Idf.Lit, d.Obj); err != nil {
 		panic(err)
 	}
+
+	t.env = d.Env
+	t.fun = d.Obj.Typ.Extra.(*typ.Func)
+
+	d.Body.Accept(t)
 
 	t.fun = nil
 	t.env = d.Env.Parent
 }
 
-func (t *typer) funcSpec(d *FuncDecl) *typ.Func {
-	fun := &typ.Func{}
+func (t *typer) funcSpec(d *FuncDecl) *typ.Type {
+	e := &typ.Func{Dec: d}
+	r := &typ.Type{Kind: typ.FUNC, Extra: e}
 
 	for _, arg := range d.Arg {
 		t.typeSpec(arg.Typ)
 
-		obj := &typ.Object{
+		if arg.Typ.Typ.Kind == typ.STRUCT {
+			arg.Typ.Typ = &typ.Type{
+				Kind:  typ.REF,
+				Extra: arg.Typ.Typ,
+			}
+		}
+
+		obj := &env.Object{
+			Cap: env.C_ADR | env.C_MOD,
 			Typ: arg.Typ.Typ,
 		}
 
@@ -102,7 +111,7 @@ func (t *typer) funcSpec(d *FuncDecl) *typ.Func {
 			panic(err)
 		}
 
-		fun.Arg = append(fun.Arg, &typ.Field{
+		e.Arg = append(e.Arg, &typ.Field{
 			Name: arg.Tok.Lit,
 			Typ:  obj.Typ,
 		})
@@ -111,12 +120,19 @@ func (t *typer) funcSpec(d *FuncDecl) *typ.Func {
 	for _, ret := range d.Ret {
 		t.typeSpec(ret.Typ)
 
-		fun.Ret = append(fun.Ret, &typ.Field{
+		if ret.Typ.Typ.Kind == typ.STRUCT {
+			ret.Typ.Typ = &typ.Type{
+				Kind:  typ.REF,
+				Extra: ret.Typ.Typ,
+			}
+		}
+
+		e.Ret = append(e.Ret, &typ.Field{
 			Typ: ret.Typ.Typ,
 		})
 	}
 
-	return fun
+	return r
 }
 
 func (t *typer) typeSpec(s *TypeSpec) {
@@ -145,71 +161,76 @@ func (t *typer) typeSpec(s *TypeSpec) {
 }
 
 func (t *typer) visitStructDecl(d *StructDecl) {
-	t.visitTypeSpec(d.Spec, false)
+	d.Obj = &env.Object{Typ: t.structSpec(d)}
 
-	if err := t.curEnv.InsertSym(d.Tok.Lit, d.Spec.Type()); err != nil {
+	if err := t.env.Insert(d.Idf.Lit, d.Obj); err != nil {
 		panic(err)
 	}
 }
 
-func (t *typer) visitTypeSpec(u TypeSpec, env bool) {
-	switch s := u.(type) {
-	case *BaseSpec:
-		t.visitBaseSpec(s)
-	case *FuncSpec:
-		t.visitFuncSpec(s, env)
-	case *CompSpec:
-		t.visitCompSpec(s)
-	}
-}
+func (t *typer) structSpec(d *StructDecl) *typ.Type {
+	e := &typ.Struct{Mem: make(map[string]*typ.Field), Dec: d}
+	r := &typ.Type{Kind: typ.STRUCT, Extra: e}
 
-func (t *typer) visitBaseSpec(s *BaseSpec) {
-}
+	for idx, mem := range d.Mem {
+		t.typeSpec(mem.Typ)
 
-func (t *typer) visitFuncSpec(s *FuncSpec, env bool) {
-}
-
-func (t *typer) visitCompSpec(s *CompSpec) {
-	inf := typ.CompInfo{Fields: make(map[string]*typ.Field)}
-	off := 0
-
-	for _, fld := range s.Fields {
-		t.visitTypeSpec(fld.Typ, false)
-
-		if _, ok := inf.Fields[fld.Tok.Lit]; ok {
-			panic("duplicated field")
+		if _, ok := e.Mem[mem.Tok.Lit]; ok {
+			panic("duplicated structure member")
 		}
 
-		inf.Fields[fld.Tok.Lit] = &typ.Field{
-			Name: fld.Tok.Lit,
-			Typ:  fld.Typ.Type(),
-			Off:  off,
+		e.Mem[mem.Tok.Lit] = &typ.Field{
+			Name: mem.Tok.Lit,
+			Typ:  mem.Typ.Typ,
+			Idx:  idx,
+		}
+	}
+
+	return r
+}
+
+func (t *typer) visitEnumDecl(d *EnumDecl) {
+	d.Obj = &env.Object{Typ: t.enumSpec(d)}
+
+	if err := t.env.Insert(d.Idf.Lit, d.Obj); err != nil {
+		panic(err)
+	}
+}
+
+func (t *typer) enumSpec(d *EnumDecl) *typ.Type {
+	e := &typ.Enum{Mem: make(map[string]uint8), Dec: d}
+	r := &typ.Type{Kind: typ.ENUM, Extra: e}
+
+	for idx, mem := range d.Mem {
+		if _, ok := e.Mem[mem.Lit]; ok {
+			panic("duplicated enum member")
 		}
 
-		off += fld.Typ.Type().Size()
+		e.Mem[mem.Lit] = uint8(idx)
 	}
 
-	s.Typ = &typ.Type{
-		Kind: typ.COMP,
-		Info: &inf,
-	}
+	return r
 }
 
 func (t *typer) VisitStmt(u Stmt) {
 	switch s := u.(type) {
+	case *ReturnStmt:
+		t.visitReturnStmt(s)
+	case *VarStmt:
+		t.visitVarStmt(s)
+	case *LetStmt:
+		t.visitLetStmt(s)
+	case *AssignStmt:
+		t.visitAssignStmt(s)
 	case *BlockStmt:
-		s.Env = typ.NewEnv(t.curEnv)
-		t.curEnv = s.Env
+		s.Env = env.New(t.env)
+		t.env = s.Env
 
 		for _, o := range s.Body {
 			o.Accept(t)
 		}
 
-		t.curEnv = s.Env.Parent
-	case *AssignStmt:
-		t.visitAssignStmt(s)
-	case *ReturnStmt:
-		t.visitReturnStmt(s)
+		t.env = s.Env.Parent
 	case *LoopStmt:
 		s.Con.Accept(t)
 		s.Rep.Accept(t)
@@ -221,77 +242,131 @@ func (t *typer) VisitStmt(u Stmt) {
 			s.Neg.Accept(t)
 		}
 	case *CallStmt:
-		s.Exp.Accept(t)
+		s.CallExpr.Accept(t)
 
-		if s.Exp.Type() != nil {
+		if s.Type() != nil {
 			panic("missed return")
 		}
 	}
 }
 
-func (t *typer) visitAssignStmt(a *AssignStmt) {
-	a.Val.Accept(t)
-
-	if a.Dec {
-		idf := a.Var.(*IdfExpr)
-		idf.Obj = &typ.Object{
-			Typ: a.Val.Type(),
-			Off: -1,
-		}
-
-		if err := t.curEnv.InsertObj(idf.Tok.Lit, idf.Obj); err != nil {
-			panic(err)
-		}
-
-		return
+func (t *typer) visitReturnStmt(r *ReturnStmt) {
+	if len(t.fun.Ret) != len(r.Ret) {
+		panic("function doesn't suppose to return anything")
 	}
 
+	for i, r := range r.Ret {
+		r.Accept(t)
+
+		if r.Caps()&env.C_ADR == 0 {
+			panic("could not return non-addressable object")
+		}
+
+		n := r.Type()
+
+		if n.Kind == typ.STRUCT || n.Kind == typ.ARRAY {
+			p := &typ.Type{Kind: n.Kind, Extra: n.Extra}
+
+			n.Kind = typ.REF
+			n.Extra = p
+		}
+
+		if !t.fun.Ret[i].Typ.Equal(r.Type()) {
+			panic("type mismatch")
+		}
+	}
+}
+
+func (t *typer) visitVarStmt(s *VarStmt) {
+	s.Ini.Accept(t)
+
+	if err := t.env.Insert(s.Idf.Lit, &env.Object{
+		Cap: env.C_ADR | env.C_MOD,
+		Typ: s.Ini.Type(),
+	}); err != nil {
+		panic(err)
+	}
+}
+
+func (t *typer) visitLetStmt(s *LetStmt) {
+	s.Ini.Accept(t)
+
+	if err := t.env.Insert(s.Idf.Lit, &env.Object{
+		Cap: env.C_ADR | env.C_MOD,
+		Typ: s.Ini.Type(),
+	}); err != nil {
+		panic(err)
+	}
+}
+
+func (t *typer) visitAssignStmt(a *AssignStmt) {
 	a.Var.Accept(t)
+	a.Val.Accept(t)
+
+	if a.Var.Caps()&env.C_MOD == 0 {
+		panic("could not assign to immutable object")
+	}
 
 	if !a.Var.Type().Equal(a.Val.Type()) {
 		panic("type mismatch")
 	}
 }
 
-func (t *typer) visitReturnStmt(r *ReturnStmt) {
-	r.Ret.Accept(t)
-
-	if t.curInf.Ret == nil {
-		panic("void function does not suppose to return")
-	}
-
-	if !r.Ret.Type().Equal(t.curInf.Ret.Typ) {
-		panic("type mismatch")
-	}
-}
-
 func (t *typer) VisitExpr(u Expr) {
 	switch e := u.(type) {
-	case *BaseImmExpr:
-		t.visitBaseImmExpr(e)
-	case *CompImmExpr:
-		t.visitCompImmExpr(e)
+	case *ImmExpr:
+		t.visitImmExpr(e)
+	case *StructExpr:
+		t.visitStructExpr(e)
 	case *IdfExpr:
-		e.Obj, _ = t.curEnv.LookupObj(e.Tok.Lit)
+		// TODO: position-independent definition
+		e.Obj, _ = t.env.Lookup(e.Tok.Lit)
 
 		if e.Obj == nil {
 			panic("undefined variable")
 		}
-	case *DotExpr:
-		e.Comp.Accept(t)
 
-		if e.Comp.Type().Kind != typ.COMP {
+		if e.Obj.Cap&env.C_ADR == 0 {
+			panic("misused identifier")
+		}
+	case *DotExpr:
+		e.Env.Accept(t)
+
+		if e.Caps()&env.C_ADR == 0 {
 			panic("misused dot expression")
 		}
 
-		inf := e.Comp.Type().Info.(*typ.CompInfo)
-		fld, ok := inf.Fields[e.Field.Lit]
+		switch e.Env.Type().Kind {
+		case typ.PKG:
+			inf := e.Env.Type().Extra.(*env.Package)
+			obj, _ := inf.Env.Lookup(e.Mem.Lit)
 
-		if !ok {
-			panic("no such field")
+			if obj == nil {
+				panic("unknown package member")
+			}
+
+			e.Typ = obj.Typ
+		case typ.STRUCT:
+			inf := e.Env.Type().Extra.(*typ.Struct)
+			mem, ok := inf.Mem[e.Mem.Lit]
+
+			if !ok {
+				panic("unknown structure member")
+			}
+
+			e.Typ = mem.Typ
+		case typ.ENUM:
+			inf := e.Env.Type().Extra.(*typ.Enum)
+
+			if _, ok := inf.Mem[e.Mem.Lit]; !ok {
+				panic("unknown enum member")
+			}
+
+			e.Typ = e.Env.Type()
+		default:
+			panic("misused dot expression")
 		}
 
-		e.Typ = fld.Typ
 	case *InfExpr:
 		e.X.Accept(t)
 		e.Y.Accept(t)
@@ -303,72 +378,77 @@ func (t *typer) VisitExpr(u Expr) {
 			panic("type mismatch")
 		}
 
-		if tx.Kind == typ.COMP || tx.Kind == typ.FUNC {
-			panic("unsupported operand")
-		}
-
-		if ty.Kind == typ.COMP || ty.Kind == typ.FUNC {
-			panic("unsupported operand")
+		if _, ok := compatibility[e.Tok.TokenType][e.X.Type().Kind]; !ok {
+			panic("unsupported operation")
 		}
 
 		e.Typ = tx
 	case *PfxExpr:
 		e.X.Accept(t)
 
-		if e.X.Type().Kind == typ.COMP || e.X.Type().Kind == typ.FUNC {
-			panic("unsupported operand")
+		if _, ok := compatibility[e.Tok.TokenType][e.X.Type().Kind]; !ok {
+			panic("unsupported operation")
 		}
 
 		e.Typ = e.X.Type()
 	case *CallExpr:
-		sym, _ := t.curEnv.LookupFun(e.Tok.Lit)
+		sym, _ := t.env.Lookup(e.Tok.Lit)
 
-		if sym == nil {
+		if sym == nil || sym.Typ.Kind != typ.FUNC {
 			panic("undeclared function")
 		}
 
-		e.Sym = sym
+		// TODO: multiple return values
+
+		e.FunTyp = sym.Typ
 
 		for _, arg := range e.Arg {
 			arg.Accept(t)
+
+			n := arg.Type()
+
+			if n.Kind == typ.STRUCT || n.Kind == typ.ARRAY {
+				p := &typ.Type{Kind: n.Kind, Extra: n.Extra}
+
+				n.Kind = typ.REF
+				n.Extra = p
+			}
 		}
 
-		inf := sym.Info.(*typ.FuncInfo)
+		fun := sym.Typ.Extra.(*typ.Func)
 
-		if len(inf.Arg) != len(e.Arg) {
-			panic("function argument disbalance")
+		if len(fun.Arg) != len(e.Arg) {
+			panic("unsatisfied function signature")
 		}
 
-		for i := range inf.Arg {
-			if inf.Arg[i].Typ.Kind == typ.ANY {
+		for i := range fun.Arg {
+			if fun.Arg[i].Typ.Kind == typ.ANY {
 				continue
 			}
 
-			if !inf.Arg[i].Typ.Equal(e.Arg[i].Type()) {
-				panic("type mismatch")
+			if !fun.Arg[i].Typ.Equal(e.Arg[i].Type()) {
+				panic("unsatisfied function signature")
 			}
 		}
 
-		if inf.Ret == nil {
-			e.Typ = nil
+		if len(fun.Ret) == 0 {
+			e.RetTyp = nil
 		} else {
-			e.Typ = inf.Ret.Typ
+			e.RetTyp = fun.Ret[0].Typ
 		}
 	case *ToSigExpr:
 		e.X.Accept(t)
 
-		switch e.X.Type().Kind {
-		case typ.FUNC, typ.COMP, typ.BOOL:
-			panic("unsupported operand type")
+		if _, ok := compatibility[e.Tok.TokenType][e.X.Type().Kind]; !ok {
+			panic("unsupported operation")
 		}
 
 		e.Typ = &typ.Sig64Type
 	case *ToUnsExpr:
 		e.X.Accept(t)
 
-		switch e.X.Type().Kind {
-		case typ.FUNC, typ.COMP, typ.BOOL:
-			panic("unsupported operand type")
+		if _, ok := compatibility[e.Tok.TokenType][e.X.Type().Kind]; !ok {
+			panic("unsupported operation")
 		}
 
 		e.Typ = &typ.Uns64Type
@@ -376,24 +456,21 @@ func (t *typer) VisitExpr(u Expr) {
 	case *ToFltExpr:
 		e.X.Accept(t)
 
-		switch e.X.Type().Kind {
-		case typ.FUNC, typ.COMP, typ.BOOL:
-			panic("unsupported operand type")
+		if _, ok := compatibility[e.Tok.TokenType][e.X.Type().Kind]; !ok {
+			panic("unsupported operation")
 		}
 
 		e.Typ = &typ.Flt64Type
 	}
 }
 
-func (t *typer) visitBaseImmExpr(e *BaseImmExpr) {
-	if imm := t.curEnv.LookupImm(e.Tok.Lit); imm != nil {
-		e.Obj = imm
+func (t *typer) visitImmExpr(e *ImmExpr) {
+	if obj, ok := t.pkg.Imm[e.Tok.Lit]; ok {
+		e.Obj = obj
 		return
 	}
 
-	e.Obj = &typ.Object{
-		Off: -1,
-	}
+	e.Obj = &env.Object{}
 
 	switch e.Tok.TokenType {
 	case lex.II64:
@@ -410,38 +487,70 @@ func (t *typer) visitBaseImmExpr(e *BaseImmExpr) {
 		e.Obj.Val, _ = strconv.ParseBool(e.Tok.Lit)
 	}
 
-	t.curEnv.InsertImm(e.Tok.Lit, e.Obj)
+	t.pkg.Imm[e.Tok.Lit] = e.Obj
 }
 
-func (t *typer) visitCompImmExpr(e *CompImmExpr) {
-	sym, _ := t.curEnv.LookupSym(e.Tok.Lit)
+func (t *typer) visitStructExpr(e *StructExpr) {
+	obj, _ := t.env.Lookup(e.Tok.Lit)
 
-	if sym == nil || sym.Kind != typ.COMP {
-		panic("undefined compound")
+	if obj == nil || obj.Typ.Kind != typ.STRUCT {
+		panic("undefined structure")
 	}
 
-	inf := sym.Info.(*typ.CompInfo)
-	off := 0
+	inf := obj.Typ.Extra.(*typ.Struct)
+	idx := 0
 
 	for _, f := range e.Fields {
-		fld, ok := inf.Fields[f.Tok.Lit]
+		mem, ok := inf.Mem[f.Tok.Lit]
 
 		if !ok {
-			panic("unknown field")
+			panic("unknown structure member")
 		}
 
-		if fld.Off < off {
-			panic("immediate compounds must be ordered")
+		if mem.Idx < idx {
+			panic("immediate structure fields must be ordered")
 		}
 
 		f.Val.Accept(t)
 
-		if !fld.Typ.Equal(f.Val.Type()) {
+		if !mem.Typ.Equal(f.Val.Type()) {
 			panic("type mismatch")
 		}
 
-		off = fld.Off
+		idx = mem.Idx
 	}
 
-	e.Typ = sym
+	e.Typ = obj.Typ
+}
+
+var compatibility map[lex.TokenType]map[typ.Kind]bool = map[lex.TokenType]map[typ.Kind]bool{
+	lex.ADD:  {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.SUB:  {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.MUL:  {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.DIV:  {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.POW:  {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.SHL:  {typ.I64: true, typ.U64: true},
+	lex.SHR:  {typ.I64: true, typ.U64: true},
+	lex.MOD:  {typ.I64: true, typ.U64: true},
+	lex.BAND: {typ.I64: true, typ.U64: true},
+	lex.BOR:  {typ.I64: true, typ.U64: true},
+	lex.BXOR: {typ.I64: true, typ.U64: true},
+
+	lex.BNEG: {typ.I64: true, typ.U64: true},
+	lex.UNEG: {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.LNEG: {typ.BOOL: true},
+
+	lex.LT:  {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.LE:  {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.GT:  {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.GE:  {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.EEQ: {typ.I64: true, typ.U64: true, typ.F64: true},
+	lex.NE:  {typ.I64: true, typ.U64: true, typ.F64: true},
+
+	lex.LAND: {typ.BOOL: true},
+	lex.LOR:  {typ.BOOL: true},
+
+	lex.I64: {typ.U64: true, typ.F64: true},
+	lex.U64: {typ.I64: true, typ.F64: true},
+	lex.F64: {typ.I64: true, typ.U64: true},
 }

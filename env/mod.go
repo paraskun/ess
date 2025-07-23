@@ -1,7 +1,12 @@
-package typ
+package env
 
 import (
+	"errors"
 	"fmt"
+	"os"
+
+	"github.com/paraskun/x/typ"
+	yaml "gopkg.in/yaml.v3"
 )
 
 type Version struct {
@@ -29,6 +34,9 @@ func (v *Version) Parse(s string) error {
 }
 
 type Module struct {
+	Name string   `yaml:"module.name"`
+	Uses []string `yaml:"module.uses"`
+
 	Host string // github.com
 	User string // paraskun
 	Repo string // x
@@ -37,12 +45,33 @@ type Module struct {
 	Version Version
 
 	Pkg map[string]*Package
-	Use map[string]*Module
 }
 
-func Import(path string) *Module
+func (mod *Module) Load(path string) error {
+	yml, err := os.ReadFile("./x.yml")
 
-func (mod *Module) Lookup(path string) (*Package, error)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("not inside X module: %w", err)
+		}
+
+		return err
+	}
+
+	if err := yaml.Unmarshal(yml, mod); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (mod *Module) Fetch() (string, error) {
+	return "", nil
+}
+
+func (mod *Module) Lookup(path string) *Package {
+	return nil
+}
 
 type Package struct {
 	Name string // ast
@@ -59,11 +88,11 @@ type Package struct {
 	Imm map[string]*Object
 }
 
-func (pkg *Package) Insert(lit string, typ *Type) *Object {
+func (pkg *Package) Insert(lit string, typ *typ.Type) *Object {
 	obj, ok := pkg.Imm[lit]
 
 	if !ok {
-		obj = &Object{typ, nil}
+		obj = &Object{typ, 0, nil}
 		pkg.Imm[lit] = obj
 	}
 

@@ -1,0 +1,36 @@
+ColumnLimit: 120
+IndentWidth: 4
+
+DerivePointerAlignment: false
+PointerAlignment: Right
+
+AlignAfterOpenBracket: DontAlign
+AlignArrayOfStructures: Left
+AlignConsecutiveAssignments: None
+AlignConsecutiveBitFields: Consecutive
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+AlignConsecutiveMacros: Consecutive
+AlignEscapedNewlines: Right
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseExpressionOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+BreakBeforeBraces: Custom
+BreakBinaryOperations: OnePerLine
+BraceWrapping:
+  AfterEnum: true
+  AfterStruct: true
+  AfterFunction: true
+  AfterUnion: true
+  BeforeWhile: false
+  SplitEmptyFunction: false
+  AfterCaseLabel: false
+BreakArrays: false
+IndentCaseLabels: true

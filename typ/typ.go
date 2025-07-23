@@ -1,5 +1,4 @@
-// Package typ describes language type system, environment
-// handling and package definition.
+// Package typ describes language type system.
 package typ
 
 type Kind byte
@@ -43,7 +42,7 @@ type (
 	Type struct {
 		Kind Kind
 
-		// PKG 		-> *Package
+		// PKG 		-> *env.Package
 		// REF 		-> *Type
 		// FUNC 	-> *Func
 		// ENUM 	-> *Enum
@@ -63,7 +62,6 @@ type (
 	Func struct {
 		Arg []*Field
 		Ret []*Field
-
 		Dec any // *ast.FuncDecl
 	}
 

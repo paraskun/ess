@@ -13,7 +13,6 @@ const (
 	IU64 // 102u
 	IF64 // 102.0
 	ISTR // "hi!"
-	IMEM // enum member (uppercase identifier)
 
 	// Punctuation
 

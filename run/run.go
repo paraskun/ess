@@ -1,3 +1,4 @@
+//go:build ignore
 package run
 
 import (
@@ -5,8 +6,6 @@ import (
 	"math"
 	"unsafe"
 
-	"github.com/paraskun/ess-go/img"
-	"github.com/paraskun/ess-go/typ"
 )
 
 const (
