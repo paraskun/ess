@@ -3,13 +3,13 @@ package main
 import (
 	"fmt"
 
-	"github.com/paraskun/x/env"
+	"github.com/paraskun/o2/typ/mod"
 	"github.com/spf13/cobra"
 )
 
 var build = &cobra.Command{
 	Use:   "build [package]",
-	Short: "Build compiles specified package into shared library.",
+	Short: "Build compiles specified package.",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 {
 			return fmt.Errorf("requires exactly one argument")
@@ -18,7 +18,7 @@ var build = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mod := &env.Module{
+		mod := &mod.Module{
 			Version: env.Version{},
 		}
 

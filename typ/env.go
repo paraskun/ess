@@ -1,23 +1,28 @@
-package env
+package typ
 
 import (
 	"fmt"
-
-	"github.com/paraskun/x/typ"
 )
+
+type Segment byte
 
 const (
-	C_ADR = (1 << 0) // addressable
-	C_MOD = (1 << 1) // modifiable
+	Abstract Segment = iota
+
+	Text
+	PDat
+	SDat
+	DDat
 )
 
-// Object is a named unique typed program entity.
+// Object is a unique typed program entity.
 //
 // Multiple entities can share the same Type, but
 // each can only have one attached Object.
 type Object struct {
-	Typ *typ.Type
-	Cap uint8 // capabilities
+	Typ *Type
+	Seg Segment
+	Off uint32
 	Val any
 }
 
@@ -25,7 +30,7 @@ type Object struct {
 func (o *Object) Size() int {
 	// For objects that passed by reference
 	// we have to store only base address.
-	if o.Typ.Kind == typ.REF {
+	if o.Typ.Kind == REF {
 		return 8
 	}
 

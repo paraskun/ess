@@ -26,10 +26,10 @@ const (
 	// an argument to native functions.
 
 	PKG
+	DEC
 	ANY
 	REF
 
-	VOID
 	FUNC
 	ENUM
 	ARRAY
@@ -43,6 +43,7 @@ type (
 		Kind Kind
 
 		// PKG 		-> *env.Package
+		// DEC		-> *Type
 		// REF 		-> *Type
 		// FUNC 	-> *Func
 		// ENUM 	-> *Enum
@@ -99,8 +100,6 @@ func (t *Type) Size() (r int) {
 		for _, f := range t.Extra.(*Struct).Mem {
 			r += f.Typ.Size()
 		}
-	case VOID:
-		return 0
 	}
 
 	return r
@@ -120,9 +119,9 @@ func (t *Type) Equal(o *Type) bool {
 
 var (
 	AnyType   = Type{Kind: ANY}
-	VoidType  = Type{Kind: VOID}
 	BoolType  = Type{Kind: BOOL}
 	Sig64Type = Type{Kind: I64}
 	Uns64Type = Type{Kind: U64}
 	Flt64Type = Type{Kind: F64}
+	StrType   = Type{Kind: STR}
 )

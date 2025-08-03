@@ -1,15 +1,16 @@
-#ifndef X_RUN_CMD_H
-#define X_RUN_CMD_H
+#ifndef O2_RUN_CMD_H
+#define O2_RUN_CMD_H
 
-#include "typ.h"
+#include <o2/typ.h>
 
-typedef enum x_reg
+typedef enum o2_reg
 {
-    RSP = 0x0,
-    RIP = 0x1,
-} x_reg;
+    O2_RSP = 0x0,
+    O2_RIP = 0x1,
+    O2_RBP = 0x2,
+} o2_reg;
 
-typedef enum x_cmd
+typedef enum o2_cmd
 {
     JMP = 0x00,              // jmp <b:8> <o:4>
     JAT = JMP | (0x01 << 5), // jat <o:4>
@@ -86,58 +87,58 @@ typedef enum x_cmd
     EQ = 0x1d, // eq
     NE = 0x1e, // ne
 
-    ADDI = ADD | I64,
-    SUBI = SUB | I64,
-    MULI = MUL | I64,
-    DIVI = DIV | I64,
-    POWI = POW | I64,
-    SHLI = SHL | I64,
-    SHRI = SHR | I64,
-    MODI = MOD | I64,
-    XORI = XOR | I64,
-    ANDI = AND | I64,
-    BORI = BOR | I64,
-    NOTI = NOT | I64,
-    NEGI = NEG | I64,
+    ADDI = ADD | O2_I64,
+    SUBI = SUB | O2_I64,
+    MULI = MUL | O2_I64,
+    DIVI = DIV | O2_I64,
+    POWI = POW | O2_I64,
+    SHLI = SHL | O2_I64,
+    SHRI = SHR | O2_I64,
+    MODI = MOD | O2_I64,
+    XORI = XOR | O2_I64,
+    ANDI = AND | O2_I64,
+    BORI = BOR | O2_I64,
+    NOTI = NOT | O2_I64,
+    NEGI = NEG | O2_I64,
 
-    LTI = LT | I64,
-    LEI = LE | I64,
-    EQI = EQ | I64,
-    NEI = NE | I64,
+    LTI = LT | O2_I64,
+    LEI = LE | O2_I64,
+    EQI = EQ | O2_I64,
+    NEI = NE | O2_I64,
 
-    ADDU = ADD | U64,
-    SUBU = SUB | U64,
-    MULU = MUL | U64,
-    DIVU = DIV | U64,
-    POWU = POW | U64,
-    SHLU = SHL | U64,
-    SHRU = SHR | U64,
-    MODU = MOD | U64,
-    XORU = XOR | U64,
-    ANDU = AND | U64,
-    BORU = BOR | U64,
-    NOTU = NOT | U64,
+    ADDU = ADD | O2_U64,
+    SUBU = SUB | O2_U64,
+    MULU = MUL | O2_U64,
+    DIVU = DIV | O2_U64,
+    POWU = POW | O2_U64,
+    SHLU = SHL | O2_U64,
+    SHRU = SHR | O2_U64,
+    MODU = MOD | O2_U64,
+    XORU = XOR | O2_U64,
+    ANDU = AND | O2_U64,
+    BORU = BOR | O2_U64,
+    NOTU = NOT | O2_U64,
 
-    LTU = LT | F64,
-    LEU = LE | F64,
-    EQU = EQ | F64,
-    NEU = NE | F64,
+    LTU = LT | O2_F64,
+    LEU = LE | O2_F64,
+    EQU = EQ | O2_F64,
+    NEU = NE | O2_F64,
 
-    ADDF = ADD | F64,
-    SUBF = SUB | F64,
-    MULF = MUL | F64,
-    DIVF = DIV | F64,
-    POWF = POW | F64,
-    NEGF = NEG | F64,
+    ADDF = ADD | O2_F64,
+    SUBF = SUB | O2_F64,
+    MULF = MUL | O2_F64,
+    DIVF = DIV | O2_F64,
+    POWF = POW | O2_F64,
+    NEGF = NEG | O2_F64,
 
-    LTF = LT | F64,
-    LEF = LE | F64,
-    EQF = EQ | F64,
-    NEF = NE | F64,
+    LTF = LT | O2_F64,
+    LEF = LE | O2_F64,
+    EQF = EQ | O2_F64,
+    NEF = NE | O2_F64,
 
-    ANDB = AND | BOOL,
-    BORB = BOR | BOOL,
-    NOTB = NOT | BOOL,
-} x_cmd;
+    ANDB = AND | O2_LOG,
+    BORB = BOR | O2_LOG,
+    NOTB = NOT | O2_LOG,
+} o2_cmd;
 
-#endif // X_RUN_CMD_H
+#endif // O2_RUN_CMD_H

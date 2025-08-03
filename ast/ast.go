@@ -5,9 +5,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/paraskun/x/env"
-	"github.com/paraskun/x/lex"
-	"github.com/paraskun/x/typ"
+	"github.com/paraskun/o2/lex"
+	"github.com/paraskun/o2/typ"
+	"github.com/paraskun/o2/typ/mod"
 )
 
 type Visitor interface {
@@ -35,19 +35,27 @@ type (
 
 		// Typing pass
 
-		Env *env.Env
+		Env *typ.Env
 	}
 
 	VarStmt struct {
 		Tok *lex.Token // 'var'
 		Idf *lex.Token
 		Ini Expr
+
+		// Typing pass
+
+		Obj *typ.Object
 	}
 
 	LetStmt struct {
 		Tok *lex.Token // 'let'
 		Idf *lex.Token
 		Ini Expr
+
+		// Typing pass
+
+		Obj *typ.Object
 	}
 
 	AssignStmt struct {
@@ -75,7 +83,7 @@ type (
 
 	ReturnStmt struct {
 		Tok *lex.Token // 'return'
-		Ret []Expr
+		Ret Expr
 	}
 )
 
@@ -85,8 +93,7 @@ type (
 	Expr interface {
 		Node
 
-		Type() *typ.Type
-		Caps() uint8
+		Object() *typ.Object
 		expr()
 	}
 
@@ -96,7 +103,7 @@ type (
 
 		// Typing pass
 
-		Obj *env.Object
+		Obj *typ.Object
 	}
 
 	StructField struct {
@@ -106,12 +113,12 @@ type (
 
 	// Immediate expression of struct type.
 	StructExpr struct {
-		Tok    *lex.Token // struct name
-		Fields []StructField
+		Tok *lex.Token // struct name
+		Mem []StructField
 
 		// Typing pass
 
-		Typ *typ.Type
+		Obj *typ.Object
 	}
 
 	IdfExpr struct {
@@ -119,17 +126,17 @@ type (
 
 		// Typing pass
 
-		Obj *env.Object
+		Obj *typ.Object
 	}
 
 	DotExpr struct {
 		Tok *lex.Token // '.'
-		Env Expr
+		Ctx Expr
 		Mem *lex.Token
 
 		// Typing pass
 
-		Typ *typ.Type
+		Obj *typ.Object
 	}
 
 	// Infix expression.
@@ -140,7 +147,7 @@ type (
 
 		// Typing pass
 
-		Typ *typ.Type
+		Res *typ.Object
 	}
 
 	// Prefix expression.
@@ -150,7 +157,7 @@ type (
 
 		// Typing pass
 
-		Typ *typ.Type
+		Res *typ.Object
 	}
 
 	CallExpr struct {
@@ -159,35 +166,35 @@ type (
 
 		// Typing pass
 
-		FunTyp *typ.Type // function type
-		RetTyp *typ.Type // return type
+		Fun *typ.Object
+		Ret *typ.Object
 	}
 
-	ToSigExpr struct {
+	ToI64Expr struct {
 		Tok *lex.Token
 		X   Expr
 
 		// Typing pass
 
-		Typ *typ.Type // i64
+		Res *typ.Object
 	}
 
-	ToUnsExpr struct {
+	ToU64Expr struct {
 		Tok *lex.Token
 		X   Expr
 
 		// Typing pass
 
-		Typ *typ.Type // u64
+		Res *typ.Object
 	}
 
-	ToFltExpr struct {
+	ToF64Expr struct {
 		Tok *lex.Token
 		X   Expr
 
 		// Typing pass
 
-		Typ *typ.Type // f64
+		Res *typ.Object
 	}
 )
 
@@ -203,11 +210,11 @@ type (
 	UseDecl struct {
 		Tok *lex.Token // 'use'
 		Idf *lex.Token
-		Pkg *env.Package
+		Pkg *mod.Package
 
 		// Typing pass
 
-		Obj *env.Object
+		Obj *typ.Object
 	}
 
 	VarDecl struct {
@@ -233,14 +240,14 @@ type (
 		Tok *lex.Token // 'func'
 		Idf *lex.Token
 		Arg []*Field
-		Ret []*Field
+		Ret *Field
 
 		Body *BlockStmt
 
 		// Typing pass
 
-		Env *env.Env
-		Obj *env.Object
+		Env *typ.Env
+		Obj *typ.Object
 	}
 
 	StructDecl struct {
@@ -250,7 +257,7 @@ type (
 
 		// Typing pass
 
-		Obj *env.Object
+		Obj *typ.Object
 	}
 
 	EnumDecl struct {
@@ -260,7 +267,7 @@ type (
 
 		// Typing pass
 
-		Obj *env.Object
+		Obj *typ.Object
 	}
 )
 
@@ -268,32 +275,9 @@ type File struct {
 	Dec []Decl
 }
 
-type options struct {
-	withType bool
-	withFunc bool
-	withGlob bool
-	withDeps bool
-}
+type options struct{}
 
 type Option func(*options)
-
-func WithType(opt *options) {
-	opt.withType = true
-}
-
-func WithGlob(opt *options) {
-	opt.withGlob = true
-}
-
-func WithFunc(opt *options) {
-	opt.withFunc = true
-}
-
-// WithDeps forces parser to recursively parse
-// packages in use by the target.
-func WithDeps(opt *options) {
-	opt.withDeps = true
-}
 
 type parser struct {
 	lex lex.Scanner
@@ -302,7 +286,7 @@ type parser struct {
 	cur *lex.Token
 
 	ops *options
-	pkg *env.Package
+	pkg *mod.Package
 }
 
 func (p *parser) next() *lex.Token {
@@ -334,7 +318,7 @@ func (p *parser) must(tt lex.TokenType) *lex.Token {
 	return p.cur
 }
 
-func Parse(pkg *env.Package, opts ...Option) {
+func Parse(pkg *mod.Package, opts ...Option) {
 	ops := &options{}
 
 	for _, opt := range opts {
@@ -344,7 +328,7 @@ func Parse(pkg *env.Package, opts ...Option) {
 	parse(pkg, ops)
 }
 
-func parse(pkg *env.Package, ops *options) {
+func parse(pkg *mod.Package, ops *options) {
 	p := &parser{pkg: pkg, ops: ops}
 
 	for _, src := range pkg.XSrc {
@@ -378,44 +362,22 @@ func parse(pkg *env.Package, ops *options) {
 func (p *parser) parseDecl() Decl {
 	switch p.peek().TokenType {
 	case lex.USE:
-		u := p.parseUseDecl()
+		use := p.parseUseDecl()
+		use.Pkg = p.pkg.Mod.Lookup(use.Idf.Lit)
 
-		if p.ops.withDeps {
-			pkg := p.pkg.Mod.Lookup(u.Idf.Lit)
-
-			if pkg == nil {
-				panic("no such package in context")
-			}
-
-			u.Pkg = pkg
-			parse(pkg, p.ops)
-
-			return u
+		if use.Pkg == nil {
+			panic("no such package in context")
 		}
+
+		parse(use.Pkg, p.ops)
 	case lex.VAR:
-		v := &VarDecl{VarStmt: p.parseVarStmt()}
-
-		if p.ops.withGlob {
-			return v
-		}
+		return &VarDecl{VarStmt: p.parseVarStmt()}
 	case lex.FUNC:
-		f := p.parseFuncDecl()
-
-		if p.ops.withFunc {
-			return f
-		}
+		return p.parseFuncDecl()
 	case lex.TYPE:
-		t := p.parseStructDecl()
-
-		if p.ops.withType {
-			return t
-		}
+		return p.parseStructDecl()
 	case lex.ENUM:
-		e := p.parseEnumDecl()
-
-		if p.ops.withType {
-			return e
-		}
+		return p.parseEnumDecl()
 	default:
 		panic("declaration expected")
 	}
@@ -449,19 +411,12 @@ func (p *parser) parseFuncDecl() *FuncDecl {
 	p.next()
 
 	if p.peek().TokenType == lex.LP {
-		f.Ret = append(f.Ret, p.parseUnnamedField())
+		p.next()
 
-		if p.peek().TokenType != lex.RP {
-			p.must(lex.COM)
-		}
+		f.Ret = p.parseUnnamedField()
+
+		p.must(lex.RP)
 	}
-
-	if len(f.Ret) > 1 {
-		// TODO: multiple return values
-		panic("multiple return values are not supported yet")
-	}
-
-	p.next()
 
 	if p.peek().TokenType == lex.LB {
 		f.Body = p.parseBlockStmt()
@@ -559,7 +514,7 @@ func (p *parser) parseStmt() Stmt {
 			case lex.DOT:
 				cur = &DotExpr{
 					Tok: p.next(),
-					Env: cur,
+					Ctx: cur,
 					Mem: p.must(lex.IDF),
 				}
 
@@ -667,7 +622,7 @@ func (p *parser) parseReturnStmt() *ReturnStmt {
 	r := ReturnStmt{Tok: p.must(lex.RET)}
 
 	for p.peek().TokenType != lex.SEM {
-		r.Ret = append(r.Ret, p.parseExpr0())
+		r.Ret = p.parseExpr0()
 
 		if p.peek().TokenType != lex.SEM {
 			p.must(lex.COM)
@@ -675,11 +630,6 @@ func (p *parser) parseReturnStmt() *ReturnStmt {
 	}
 
 	p.must(lex.SEM)
-
-	if len(r.Ret) > 1 {
-		// TODO: multiple return values
-		panic("multiple return values are not supported yet")
-	}
 
 	return &r
 }
@@ -809,7 +759,7 @@ func (p *parser) parseExpr6() Expr {
 		case lex.DOT:
 			cur = &DotExpr{
 				Tok: p.next(),
-				Env: cur,
+				Ctx: cur,
 				Mem: p.must(lex.IDF),
 			}
 
@@ -840,7 +790,7 @@ func (p *parser) parseExpr7() Expr {
 				p.must(lex.COL)
 				val := p.parseExpr0()
 
-				exp.Fields = append(exp.Fields, StructField{
+				exp.Mem = append(exp.Mem, StructField{
 					Tok: tok,
 					Val: val,
 				})
@@ -859,7 +809,7 @@ func (p *parser) parseExpr7() Expr {
 	case lex.II64, lex.IU64, lex.IF64, lex.TRUE, lex.FALSE:
 		return &ImmExpr{Tok: p.next()}
 	case lex.I64:
-		exp := &ToSigExpr{Tok: p.next()}
+		exp := &ToI64Expr{Tok: p.next()}
 
 		p.must(lex.LP)
 		exp.X = p.parseExpr0()
@@ -867,7 +817,7 @@ func (p *parser) parseExpr7() Expr {
 
 		return exp
 	case lex.U64:
-		exp := &ToUnsExpr{Tok: p.next()}
+		exp := &ToU64Expr{Tok: p.next()}
 
 		p.must(lex.LP)
 		exp.X = p.parseExpr0()
@@ -875,7 +825,7 @@ func (p *parser) parseExpr7() Expr {
 
 		return exp
 	case lex.F64:
-		exp := &ToFltExpr{Tok: p.next()}
+		exp := &ToF64Expr{Tok: p.next()}
 
 		p.must(lex.LP)
 		exp.X = p.parseExpr0()
@@ -918,31 +868,20 @@ func (e *DotExpr) Accept(v Visitor)    { v.VisitExpr(e) }
 func (e *InfExpr) Accept(v Visitor)    { v.VisitExpr(e) }
 func (e *PfxExpr) Accept(v Visitor)    { v.VisitExpr(e) }
 func (e *CallExpr) Accept(v Visitor)   { v.VisitExpr(e) }
-func (e *ToSigExpr) Accept(v Visitor)  { v.VisitExpr(e) }
-func (e *ToUnsExpr) Accept(v Visitor)  { v.VisitExpr(e) }
-func (e *ToFltExpr) Accept(v Visitor)  { v.VisitExpr(e) }
+func (e *ToI64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
+func (e *ToU64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
+func (e *ToF64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
 
-func (e *ImmExpr) Type() *typ.Type    { return e.Obj.Typ }
-func (e *StructExpr) Type() *typ.Type { return e.Typ }
-func (e *IdfExpr) Type() *typ.Type    { return e.Obj.Typ }
-func (e *DotExpr) Type() *typ.Type    { return e.Typ }
-func (e *InfExpr) Type() *typ.Type    { return e.Typ }
-func (e *PfxExpr) Type() *typ.Type    { return e.Typ }
-func (e *CallExpr) Type() *typ.Type   { return e.RetTyp }
-func (e *ToSigExpr) Type() *typ.Type  { return e.Typ }
-func (e *ToUnsExpr) Type() *typ.Type  { return e.Typ }
-func (e *ToFltExpr) Type() *typ.Type  { return e.Typ }
-
-func (e *ImmExpr) Caps() uint8    { return e.Obj.Cap }
-func (e *StructExpr) Caps() uint8 { return 0 }
-func (e *IdfExpr) Caps() uint8    { return e.Obj.Cap }
-func (e *DotExpr) Caps() uint8    { return e.Env.Caps() }
-func (e *InfExpr) Caps() uint8    { return 0 }
-func (e *PfxExpr) Caps() uint8    { return 0 }
-func (e *CallExpr) Caps() uint8   { return 0 }
-func (e *ToSigExpr) Caps() uint8  { return 0 }
-func (e *ToUnsExpr) Caps() uint8  { return 0 }
-func (e *ToFltExpr) Caps() uint8  { return 0 }
+func (e *ImmExpr) Object() *typ.Object    { return e.Obj }
+func (e *StructExpr) Object() *typ.Object { return e.Obj }
+func (e *IdfExpr) Object() *typ.Object    { return e.Obj }
+func (e *DotExpr) Object() *typ.Object    { return e.Obj }
+func (e *InfExpr) Object() *typ.Object    { return e.Res }
+func (e *PfxExpr) Object() *typ.Object    { return e.Res }
+func (e *CallExpr) Object() *typ.Object   { return e.Ret }
+func (e *ToI64Expr) Object() *typ.Object  { return e.Res }
+func (e *ToU64Expr) Object() *typ.Object  { return e.Res }
+func (e *ToF64Expr) Object() *typ.Object  { return e.Res }
 
 func (*ImmExpr) expr()    {}
 func (*StructExpr) expr() {}
@@ -951,9 +890,9 @@ func (*DotExpr) expr()    {}
 func (*InfExpr) expr()    {}
 func (*PfxExpr) expr()    {}
 func (*CallExpr) expr()   {}
-func (*ToSigExpr) expr()  {}
-func (*ToUnsExpr) expr()  {}
-func (*ToFltExpr) expr()  {}
+func (*ToI64Expr) expr()  {}
+func (*ToU64Expr) expr()  {}
+func (*ToF64Expr) expr()  {}
 
 func (d *UseDecl) Accept(v Visitor)    { v.VisitDecl(d) }
 func (d *VarDecl) Accept(v Visitor)    { v.VisitDecl(d) }

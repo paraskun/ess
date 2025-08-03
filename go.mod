@@ -1,4 +1,4 @@
-module github.com/paraskun/x
+module github.com/paraskun/o2
 
 go 1.24.1
 

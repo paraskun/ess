@@ -1,11 +1,12 @@
-package env
+package mod
 
 import (
 	"errors"
 	"fmt"
 	"os"
 
-	"github.com/paraskun/x/typ"
+	"github.com/paraskun/o2/typ"
+
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -34,13 +35,15 @@ func (v *Version) Parse(s string) error {
 }
 
 type Module struct {
-	Name string   `yaml:"module.name"`
-	Uses []string `yaml:"module.uses"`
+	Mod struct {
+		Name string
+		Uses []string
+	}
 
 	Host string // github.com
 	User string // paraskun
-	Repo string // x
-	Path string // mod/math, empty if root
+	Repo string // o2
+	Path string // std/math, empty if root
 
 	Version Version
 
@@ -48,11 +51,11 @@ type Module struct {
 }
 
 func (mod *Module) Load(path string) error {
-	yml, err := os.ReadFile("./x.yml")
+	yml, err := os.ReadFile(path + "/x.yml")
 
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("not inside X module: %w", err)
+			return fmt.Errorf("not inside o2 module")
 		}
 
 		return err
@@ -84,16 +87,19 @@ type Package struct {
 
 	// Typing pass
 
-	Env *Env
-	Imm map[string]*Object
+	Env *typ.Env
+	Imm map[string]*typ.Object
 }
 
-func (pkg *Package) Insert(lit string, typ *typ.Type) *Object {
-	obj, ok := pkg.Imm[lit]
+func (pkg *Package) Insert(l string, t *typ.Type) *typ.Object {
+	obj, ok := pkg.Imm[l]
 
 	if !ok {
-		obj = &Object{typ, 0, nil}
-		pkg.Imm[lit] = obj
+		obj = &typ.Object{
+			Typ: t,
+			Seg: typ.PDat,
+		}
+		pkg.Imm[l] = obj
 	}
 
 	return obj
@@ -107,6 +113,6 @@ type File struct {
 
 	// Typing pass
 
-	Dec any  // *ast.File, import cycle otherwise
-	Env *Env // Pkg.Env
+	Dec any      // *ast.File, import cycle otherwise
+	Env *typ.Env // Pkg.Env
 }

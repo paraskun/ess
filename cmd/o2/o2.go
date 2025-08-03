@@ -7,8 +7,8 @@ import (
 )
 
 var root = &cobra.Command{
-	Use:   "x",
-	Short: "X is a tool for managing X modules.",
+	Use:   "o2",
+	Short: "O2 is a tool for managing O2 modules.",
 }
 
 func init() {
@@ -23,17 +23,17 @@ func main() {
 		panic(err)
 	}
 
-	dir += "/xlang"
+	dir += "/o2"
 
 	if err := os.MkdirAll(dir+"/src", 0774); err != nil {
 		panic(err)
 	}
 
-	if err := os.MkdirAll(dir+"/pkg", 0774); err != nil {
+	if err := os.MkdirAll(dir+"/mod", 0774); err != nil {
 		panic(err)
 	}
 
-	if err := os.MkdirAll(dir+"/lib", 0774); err != nil {
+	if err := os.MkdirAll(dir+"/co2", 0774); err != nil {
 		panic(err)
 	}
 

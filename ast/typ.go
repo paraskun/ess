@@ -3,19 +3,19 @@ package ast
 import (
 	"strconv"
 
-	"github.com/paraskun/x/env"
-	"github.com/paraskun/x/lex"
-	"github.com/paraskun/x/typ"
+	"github.com/paraskun/o2/lex"
+	"github.com/paraskun/o2/typ"
+	"github.com/paraskun/o2/typ/mod"
 )
 
 type typer struct {
-	pkg *env.Package
-	env *env.Env
+	pkg *mod.Package
+	env *typ.Env
 	fun *typ.Func
 }
 
-func Typeset(pkg *env.Package) {
-	pkg.Env = env.New(nil)
+func Typeset(pkg *mod.Package) {
+	pkg.Env = typ.New(nil)
 	typ := typer{pkg: pkg, env: pkg.Env}
 
 	for _, src := range pkg.XSrc {
@@ -48,8 +48,8 @@ func (t *typer) visitUseDecl(d *UseDecl) {
 	}
 
 	// Ignore an error, if multiple files using same package.
-	_ = t.env.Insert(d.Pkg.Name, &env.Object{
-		Cap: env.C_ADR,
+	_ = t.typ.Insert(d.Pkg.Name, &typ.Object{
+		Cap: typ.C_ADR,
 		Typ: &typ.Type{
 			Kind:  typ.PKG,
 			Extra: d.Pkg,
@@ -62,8 +62,8 @@ func (t *typer) visitUseDecl(d *UseDecl) {
 func (t *typer) visitVarDecl(d *VarDecl) {
 	d.Ini.Accept(t)
 
-	if err := t.env.Insert(d.Idf.Lit, &env.Object{
-		Cap: env.C_ADR,
+	if err := t.typ.Insert(d.Idf.Lit, &typ.Object{
+		Cap: typ.C_ADR,
 		Typ: d.Ini.Type(),
 		Val: d.Ini.(*ImmExpr).Obj.Val, // TODO: expression evaluation
 	}); err != nil {
@@ -72,10 +72,10 @@ func (t *typer) visitVarDecl(d *VarDecl) {
 }
 
 func (t *typer) visitFuncDecl(d *FuncDecl) {
-	d.Env = env.New(t.env)
-	d.Obj = &env.Object{Typ: t.funcSpec(d)}
+	d.Env = typ.New(t.env)
+	d.Obj = &typ.Object{Typ: t.funcSpec(d)}
 
-	if err := t.env.Insert(d.Idf.Lit, d.Obj); err != nil {
+	if err := t.typ.Insert(d.Idf.Lit, d.Obj); err != nil {
 		panic(err)
 	}
 
@@ -102,12 +102,12 @@ func (t *typer) funcSpec(d *FuncDecl) *typ.Type {
 			}
 		}
 
-		obj := &env.Object{
-			Cap: env.C_ADR | env.C_MOD,
+		obj := &typ.Object{
+			Cap: typ.C_ADR | typ.C_MOD,
 			Typ: arg.Typ.Typ,
 		}
 
-		if err := t.env.Insert(arg.Tok.Lit, obj); err != nil {
+		if err := t.typ.Insert(arg.Tok.Lit, obj); err != nil {
 			panic(err)
 		}
 
@@ -146,7 +146,7 @@ func (t *typer) typeSpec(s *TypeSpec) {
 	case lex.F64:
 		s.Typ = &typ.Flt64Type
 	case lex.IDF:
-		sym, _ := t.env.Lookup(s.Tok.Lit)
+		sym, _ := t.typ.Lookup(s.Tok.Lit)
 
 		if sym == nil {
 			panic("undeclared type")
@@ -161,9 +161,9 @@ func (t *typer) typeSpec(s *TypeSpec) {
 }
 
 func (t *typer) visitStructDecl(d *StructDecl) {
-	d.Obj = &env.Object{Typ: t.structSpec(d)}
+	d.Obj = &typ.Object{Typ: t.structSpec(d)}
 
-	if err := t.env.Insert(d.Idf.Lit, d.Obj); err != nil {
+	if err := t.typ.Insert(d.Idf.Lit, d.Obj); err != nil {
 		panic(err)
 	}
 }
@@ -190,9 +190,9 @@ func (t *typer) structSpec(d *StructDecl) *typ.Type {
 }
 
 func (t *typer) visitEnumDecl(d *EnumDecl) {
-	d.Obj = &env.Object{Typ: t.enumSpec(d)}
+	d.Obj = &typ.Object{Typ: t.enumSpec(d)}
 
-	if err := t.env.Insert(d.Idf.Lit, d.Obj); err != nil {
+	if err := t.typ.Insert(d.Idf.Lit, d.Obj); err != nil {
 		panic(err)
 	}
 }
@@ -223,7 +223,7 @@ func (t *typer) VisitStmt(u Stmt) {
 	case *AssignStmt:
 		t.visitAssignStmt(s)
 	case *BlockStmt:
-		s.Env = env.New(t.env)
+		s.Env = typ.New(t.env)
 		t.env = s.Env
 
 		for _, o := range s.Body {
@@ -258,7 +258,7 @@ func (t *typer) visitReturnStmt(r *ReturnStmt) {
 	for i, r := range r.Ret {
 		r.Accept(t)
 
-		if r.Caps()&env.C_ADR == 0 {
+		if r.Caps()&typ.C_ADR == 0 {
 			panic("could not return non-addressable object")
 		}
 
@@ -280,8 +280,8 @@ func (t *typer) visitReturnStmt(r *ReturnStmt) {
 func (t *typer) visitVarStmt(s *VarStmt) {
 	s.Ini.Accept(t)
 
-	if err := t.env.Insert(s.Idf.Lit, &env.Object{
-		Cap: env.C_ADR | env.C_MOD,
+	if err := t.typ.Insert(s.Idf.Lit, &typ.Object{
+		Cap: typ.C_ADR | typ.C_MOD,
 		Typ: s.Ini.Type(),
 	}); err != nil {
 		panic(err)
@@ -291,8 +291,8 @@ func (t *typer) visitVarStmt(s *VarStmt) {
 func (t *typer) visitLetStmt(s *LetStmt) {
 	s.Ini.Accept(t)
 
-	if err := t.env.Insert(s.Idf.Lit, &env.Object{
-		Cap: env.C_ADR | env.C_MOD,
+	if err := t.typ.Insert(s.Idf.Lit, &typ.Object{
+		Cap: typ.C_ADR | typ.C_MOD,
 		Typ: s.Ini.Type(),
 	}); err != nil {
 		panic(err)
@@ -303,7 +303,7 @@ func (t *typer) visitAssignStmt(a *AssignStmt) {
 	a.Var.Accept(t)
 	a.Val.Accept(t)
 
-	if a.Var.Caps()&env.C_MOD == 0 {
+	if a.Var.Caps()&typ.C_MOD == 0 {
 		panic("could not assign to immutable object")
 	}
 
@@ -320,25 +320,25 @@ func (t *typer) VisitExpr(u Expr) {
 		t.visitStructExpr(e)
 	case *IdfExpr:
 		// TODO: position-independent definition
-		e.Obj, _ = t.env.Lookup(e.Tok.Lit)
+		e.Obj, _ = t.typ.Lookup(e.Tok.Lit)
 
 		if e.Obj == nil {
 			panic("undefined variable")
 		}
 
-		if e.Obj.Cap&env.C_ADR == 0 {
+		if e.Obj.Cap&typ.C_ADR == 0 {
 			panic("misused identifier")
 		}
 	case *DotExpr:
 		e.Env.Accept(t)
 
-		if e.Caps()&env.C_ADR == 0 {
+		if e.Caps()&typ.C_ADR == 0 {
 			panic("misused dot expression")
 		}
 
 		switch e.Env.Type().Kind {
 		case typ.PKG:
-			inf := e.Env.Type().Extra.(*env.Package)
+			inf := e.Env.Type().Extra.(*typ.Package)
 			obj, _ := inf.Env.Lookup(e.Mem.Lit)
 
 			if obj == nil {
@@ -392,7 +392,7 @@ func (t *typer) VisitExpr(u Expr) {
 
 		e.Typ = e.X.Type()
 	case *CallExpr:
-		sym, _ := t.env.Lookup(e.Tok.Lit)
+		sym, _ := t.typ.Lookup(e.Tok.Lit)
 
 		if sym == nil || sym.Typ.Kind != typ.FUNC {
 			panic("undeclared function")
@@ -470,7 +470,7 @@ func (t *typer) visitImmExpr(e *ImmExpr) {
 		return
 	}
 
-	e.Obj = &env.Object{}
+	e.Obj = &typ.Object{}
 
 	switch e.Tok.TokenType {
 	case lex.II64:
