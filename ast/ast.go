@@ -5,7 +5,9 @@ import (
 	"io"
 	"os"
 
+	"github.com/fatih/color"
 	"github.com/paraskun/o2/lex"
+	"github.com/paraskun/o2/tty"
 	"github.com/paraskun/o2/typ"
 	"github.com/paraskun/o2/typ/mod"
 )
@@ -17,6 +19,7 @@ type Visitor interface {
 }
 
 type Node interface {
+	Span() tty.Span
 	Accept(Visitor)
 }
 
@@ -30,48 +33,44 @@ type (
 	}
 
 	BlockStmt struct {
-		Tok  *lex.Token // open '{'
-		Body []Stmt
-
-		// Typing pass
+		Box *tty.Box
+		Sub []Stmt
 
 		Env *typ.Env
 	}
 
 	VarStmt struct {
-		Tok *lex.Token // 'var'
-		Idf *lex.Token
+		Box *tty.Box
+		Var *tty.Tok
 		Ini Expr
-
-		// Typing pass
 
 		Obj *typ.Object
 	}
 
 	LetStmt struct {
-		Tok *lex.Token // 'let'
-		Idf *lex.Token
+		Box *tty.Box
+		Var *tty.Tok
 		Ini Expr
-
-		// Typing pass
 
 		Obj *typ.Object
 	}
 
 	AssignStmt struct {
-		Tok *lex.Token // '='
+		Box *tty.Box
 		Var Expr
 		Val Expr
+
+		Obj *typ.Object
 	}
 
 	LoopStmt struct {
-		Tok *lex.Token // 'for'
-		Con Expr       // loop condition
-		Rep *BlockStmt // loop body
+		Box *tty.Box
+		Con Expr
+		Sub *BlockStmt
 	}
 
 	CondStmt struct {
-		Tok *lex.Token // 'if'
+		Box *tty.Box
 		Con Expr
 		Pos *BlockStmt
 		Neg *BlockStmt
@@ -82,7 +81,7 @@ type (
 	}
 
 	ReturnStmt struct {
-		Tok *lex.Token // 'return'
+		Box *tty.Box
 		Ret Expr
 	}
 )
@@ -94,105 +93,83 @@ type (
 		Node
 
 		Object() *typ.Object
+
 		expr()
 	}
 
-	// Immediate expression of basic or enum type.
-	ImmExpr struct {
-		Tok *lex.Token
-
-		// Typing pass
+	BasicExpr struct {
+		Tok *tty.Tok
 
 		Obj *typ.Object
 	}
 
-	StructField struct {
-		Tok *lex.Token // field name
+	StructFieldExpr struct {
+		Box *tty.Box
 		Val Expr
 	}
 
-	// Immediate expression of struct type.
 	StructExpr struct {
-		Tok *lex.Token // struct name
-		Mem []StructField
-
-		// Typing pass
+		Box *tty.Box
+		Mem []StructFieldExpr
 
 		Obj *typ.Object
 	}
 
-	IdfExpr struct {
-		Tok *lex.Token
-
-		// Typing pass
+	IdenExpr struct {
+		Tok *tty.Tok
 
 		Obj *typ.Object
 	}
 
 	DotExpr struct {
-		Tok *lex.Token // '.'
+		Row *tty.Row
+		Mem *tty.Tok
 		Ctx Expr
-		Mem *lex.Token
-
-		// Typing pass
 
 		Obj *typ.Object
 	}
 
-	// Infix expression.
 	InfExpr struct {
-		Tok *lex.Token
+		Row *tty.Row
 		X   Expr
 		Y   Expr
-
-		// Typing pass
 
 		Res *typ.Object
 	}
 
-	// Prefix expression.
 	PfxExpr struct {
-		Tok *lex.Token
+		Row *tty.Row
 		X   Expr
-
-		// Typing pass
 
 		Res *typ.Object
 	}
 
 	CallExpr struct {
-		Tok *lex.Token // function to call
+		Box *tty.Box
+		Sym *tty.Tok
 		Arg []Expr
-
-		// Typing pass
 
 		Fun *typ.Object
 		Ret *typ.Object
 	}
 
 	ToI64Expr struct {
-		Tok *lex.Token
+		Row *tty.Row
 		X   Expr
-
-		// Typing pass
 
 		Res *typ.Object
 	}
 
 	ToU64Expr struct {
-		Tok *lex.Token
+		Row *tty.Row
 		X   Expr
-
-		// Typing pass
 
 		Res *typ.Object
 	}
 
 	ToF64Expr struct {
-		Tok *lex.Token
+		Row *tty.Row
 		X   Expr
-
-		// Typing pass
 
 		Res *typ.Object
 	}
@@ -208,11 +185,8 @@ type (
 	}
 
 	UseDecl struct {
-		Tok *lex.Token // 'use'
-		Idf *lex.Token
-		Pkg *mod.Package
-
-		// Typing pass
+		Row *tty.Row
+		Pkg *tty.Tok
 
 		Obj *typ.Object
 	}
@@ -221,57 +195,48 @@ type (
 		*VarStmt
 	}
 
-	// TypeSpec is a node for basic, struct
-	// or enum specification.
 	TypeSpec struct {
-		Tok *lex.Token
-
-		// Typing pass
-
+		Tok *tty.Tok
 		Typ *typ.Type
 	}
 
-	Field struct {
-		Tok *lex.Token // name, maybe nil
+	NamedField struct {
+		Row *tty.Row
+		Sym *tty.Tok
 		Typ *TypeSpec
 	}
 
 	FuncDecl struct {
-		Tok *lex.Token // 'func'
-		Idf *lex.Token
-		Arg []*Field
-		Ret *Field
-
-		Body *BlockStmt
-
-		// Typing pass
+		Box *tty.Box
+		Sig *tty.Row
+		Sym *tty.Tok
+		Arg []*NamedField
+		Ret *TypeSpec
+		Sub *BlockStmt
 
 		Env *typ.Env
 		Obj *typ.Object
 	}
 
 	StructDecl struct {
-		Tok *lex.Token // 'type'
-		Idf *lex.Token // name
-		Mem []*Field   // members
-
-		// Typing pass
+		Box *tty.Box
+		Sym *tty.Tok
+		Mem []*NamedField
 
 		Obj *typ.Object
 	}
 
 	EnumDecl struct {
-		Tok *lex.Token   // 'enum'
-		Idf *lex.Token   // name
-		Mem []*lex.Token // members
-
-		// Typing pass
+		Box *tty.Box
+		Sym *tty.Tok
+		Mem []*tty.Tok
 
 		Obj *typ.Object
 	}
 )
 
 type File struct {
+	Box *tty.Box
 	Dec []Decl
 }
 
@@ -281,26 +246,87 @@ type Option func(*options)
 
 type parser struct {
 	lex lex.Scanner
+
 	buf bool
-	prv *lex.Token
-	cur *lex.Token
+	prv *lex.Lexeme
+	cur *lex.Lexeme
 
 	ops *options
 	pkg *mod.Package
+	src *mod.File
+
+	box []*tty.Box
+	row []*tty.Row
 }
 
-func (p *parser) next() *lex.Token {
+func (p *parser) newBox(ind int) {
+	box := &tty.Box{Ind: ind}
+
+	if len(p.box) != 0 {
+		out := p.box[len(p.box)-1]
+		out.Sub = append(out.Sub, box)
+	}
+
+	p.box = append(p.box, box)
+}
+
+func (p *parser) newRow(ind int) {
+	row := &tty.Row{Ind: ind}
+
+	if len(p.row) != 0 {
+		out := p.row[len(p.row)-1]
+		out.Sub = append(out.Sub, row)
+	} else if len(p.box) != 0 {
+		out := p.box[len(p.box)-1]
+		out.Sub = append(out.Sub, row)
+	} else {
+		panic("out of structure")
+	}
+
+	p.row = append(p.row, row)
+}
+
+func (p *parser) popBox() *tty.Box {
+	if len(p.row) != 0 {
+		panic("we are still have rows")
+	}
+
+	box := p.box[len(p.box)-1]
+	p.box = p.box[:len(p.box)-1]
+
+	return box
+}
+
+func (p *parser) popRow() *tty.Row {
+	row := p.row[len(p.row)-1]
+	p.row = p.row[:len(p.row)-1]
+
+	return row
+}
+
+func (p *parser) next(ind int) *lex.Lexeme {
 	if !p.buf {
 		p.prv = p.cur
 		p.cur = p.lex.Next()
 	}
 
 	p.buf = false
+	p.cur.Tok.Ind = ind
+
+	if len(p.row) != 0 {
+		row := p.row[len(p.row)-1]
+		row.Sub = append(row.Sub, p.cur.Tok)
+	} else if len(p.box) != 0 {
+		box := p.box[len(p.box)-1]
+		box.Sub = append(box.Sub, p.cur.Tok)
+	} else {
+		panic("out of structure")
+	}
 
 	return p.cur
 }
 
-func (p *parser) peek() *lex.Token {
+func (p *parser) peek() *lex.Lexeme {
 	if !p.buf {
 		p.buf = true
 		p.prv = p.cur
@@ -310,12 +336,21 @@ func (p *parser) peek() *lex.Token {
 	return p.cur
 }
 
-func (p *parser) must(tt lex.TokenType) *lex.Token {
-	if p.next().TokenType != tt {
-		panic(fmt.Errorf("%v given, but %v expected", p.cur.TokenType, tt))
+func (p *parser) must(t lex.Type, ind int) *lex.Lexeme {
+	if p.next(ind).Type != t {
+		panic(fmt.Errorf("%v given, but %v expected", p.cur.Type, t))
 	}
 
 	return p.cur
+}
+
+func (p *parser) note(n Node) {
+	f := tty.Frame{
+		Name: p.pkg.Path + "/" + p.src.Name,
+		Sub:  n.Span(),
+	}
+
+	tty.Print(&f)
 }
 
 func Parse(pkg *mod.Package, opts ...Option) {
@@ -333,6 +368,7 @@ func parse(pkg *mod.Package, ops *options) {
 
 	for _, src := range pkg.XSrc {
 		fil, err := os.Open(src.Path)
+		p.src = src
 
 		if err != nil {
 			panic(err)
@@ -340,7 +376,7 @@ func parse(pkg *mod.Package, ops *options) {
 			defer fil.Close()
 		}
 
-		dec := make([]Decl, 0)
+		dec := &File{Dec: make([]Decl, 0)}
 		buf, err := io.ReadAll(fil)
 
 		if err != nil {
@@ -348,28 +384,44 @@ func parse(pkg *mod.Package, ops *options) {
 		}
 
 		p.lex.Load([]rune(string(buf)))
+		p.newBox(0)
 
-		for p.peek().TokenType != lex.EOF {
-			if d := p.parseDecl(); dec != nil {
-				dec = append(dec, d)
-			}
+		for p.peek().Type != lex.EOF {
+			dec.Dec = append(dec.Dec, p.parseDecl())
 		}
 
-		src.Dec = &File{dec}
+		dec.Box = p.popBox()
+		src.Dec = dec
 	}
 }
 
 func (p *parser) parseDecl() Decl {
-	switch p.peek().TokenType {
+	switch p.peek().Type {
 	case lex.USE:
 		use := p.parseUseDecl()
-		use.Pkg = p.pkg.Mod.Lookup(use.Idf.Lit)
+		pkg := p.pkg.Mod.Lookup(use.Pkg.Lit)
 
-		if use.Pkg == nil {
-			panic("no such package in context")
+		if pkg == nil {
+			use.Row.Hint = &tty.Hint{
+				Text: "unknown package",
+				Attr: tty.Attr{
+					Color: *color.New(color.FgRed),
+				},
+			}
+
+			p.note(use)
 		}
 
-		parse(use.Pkg, p.ops)
+		use.Obj = &typ.Object{
+			Typ: &typ.Type{
+				Kind:  typ.PKG,
+				Extra: pkg,
+			},
+		}
+
+		parse(pkg, p.ops)
+
+		return use
 	case lex.VAR:
 		return &VarDecl{VarStmt: p.parseVarStmt()}
 	case lex.FUNC:
@@ -381,55 +433,68 @@ func (p *parser) parseDecl() Decl {
 	default:
 		panic("declaration expected")
 	}
-
-	return nil
 }
 
 func (p *parser) parseUseDecl() *UseDecl {
+	p.newRow(0)
+	p.must(lex.USE, 0)
+
 	return &UseDecl{
-		Tok: p.must(lex.USE),
-		Idf: p.must(lex.ISTR),
+		Pkg: p.must(lex.ISTR, 1).Tok,
+		Row: p.popRow(),
 	}
 }
 
 func (p *parser) parseFuncDecl() *FuncDecl {
-	f := &FuncDecl{
-		Tok: p.must(lex.FUNC),
-		Idf: p.must(lex.IDF),
-	}
+	p.newBox(0)
+	p.must(lex.FUNC, 0)
+	p.newRow(0)
+	p.newRow(1)
 
-	p.must(lex.LP)
+	res := &FuncDecl{Sym: p.must(lex.IDEN, 0).Tok}
 
-	for p.peek().TokenType != lex.RP {
-		f.Arg = append(f.Arg, p.parseNamedField())
+	p.must(lex.LP, 0)
 
-		if p.peek().TokenType != lex.RP {
-			p.must(lex.COM)
+	for p.peek().Type != lex.RP {
+		if len(res.Arg) == 0 {
+			res.Arg = append(res.Arg, p.parseNamedField(0))
+		} else {
+			res.Arg = append(res.Arg, p.parseNamedField(1))
+		}
+
+		if p.peek().Type != lex.RP {
+			p.must(lex.COM, 0)
 		}
 	}
 
-	p.next()
+	p.must(lex.RP, 0)
 
-	if p.peek().TokenType == lex.LP {
-		p.next()
-
-		f.Ret = p.parseUnnamedField()
-
-		p.must(lex.RP)
+	if p.peek().Type == lex.LP {
+		p.next(1)
+		res.Ret = p.parseTypeSpec(0)
+		p.must(lex.RP, 0)
 	}
 
-	if p.peek().TokenType == lex.LB {
-		f.Body = p.parseBlockStmt()
+	res.Sig = p.popRow()
+
+	if p.peek().Type == lex.LB {
+		p.next(1)
+		p.popRow()
+
+		res.Sub = p.parseBlockStmt(2)
+
+		p.must(lex.RB, 0)
 	}
 
-	return f
+	return res
 }
 
 func (p *parser) parseStructDecl() *StructDecl {
-	c := &StructDecl{
-		Tok: p.must(lex.TYPE),
-		Idf: p.must(lex.IDF),
-	}
+	p.newBox(0)
+	p.newRow(0)
+	p.must(lex.TYPE, 0)
+
+	c := &StructDecl{Sym: p.must(lex.IDEN, 1).Tok}
 
 	p.must(lex.LB)
 
@@ -459,29 +524,29 @@ func (p *parser) parseEnumDecl() *EnumDecl {
 	return c
 }
 
-func (p *parser) parseNamedField() *Field {
-	return &Field{
-		Tok: p.must(lex.IDF),
-		Typ: p.parseTypeSpec(),
+func (p *parser) parseNamedField(ind int) *NamedField {
+	p.newRow(ind)
+
+	return &NamedField{
+		Sym: p.must(lex.IDEN, 0).Tok,
+		Typ: p.parseTypeSpec(1),
+		Row: p.popRow(),
 	}
 }
 
-func (p *parser) parseUnnamedField() *Field {
-	return &Field{
-		Typ: p.parseTypeSpec(),
-	}
-}
-
-func (p *parser) parseTypeSpec() *TypeSpec {
-	switch p.peek().TokenType {
-	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDF:
-		return &TypeSpec{Tok: p.next()}
+func (p *parser) parseTypeSpec(ind int) *TypeSpec {
+	switch p.peek().Type {
+	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDEN:
+		return &TypeSpec{Tok: p.next(ind).Tok}
 	}
 
+	// TODO: error handling
 	panic("type specification expected")
 }
 
-func (p *parser) parseBlockStmt() *BlockStmt {
+func (p *parser) parseBlockStmt(ind int) *BlockStmt {
+	p.newBox(ind)
+
 	r := BlockStmt{
 		Tok: p.must(lex.LB),
 	}
@@ -843,6 +908,15 @@ func (p *parser) parseExpr7() Expr {
 	panic("expression expected")
 }
 
+func (s *ReturnStmt) Span() tty.Span { return s.Box }
+func (s *VarStmt) Span() tty.Span    { return s.Box }
+func (s *LetStmt) Span() tty.Span    { return s.Box }
+func (s *AssignStmt) Span() tty.Span { return s.Box }
+func (s *BlockStmt) Span() tty.Span  { return s.Box }
+func (s *LoopStmt) Span() tty.Span   { return s.Box }
+func (s *CondStmt) Span() tty.Span   { return s.Box }
+func (s *CallStmt) Span() tty.Span   { return s.Box }
+
 func (s *ReturnStmt) Accept(v Visitor) { v.VisitStmt(s) }
 func (s *VarStmt) Accept(v Visitor)    { v.VisitStmt(s) }
 func (s *LetStmt) Accept(v Visitor)    { v.VisitStmt(s) }
@@ -861,9 +935,20 @@ func (*LoopStmt) stmt()   {}
 func (*CondStmt) stmt()   {}
 func (*CallStmt) stmt()   {}
 
-func (e *ImmExpr) Accept(v Visitor)    { v.VisitExpr(e) }
+func (e *BasicExpr) Span() tty.Span  { return e.Tok }
+func (e *StructExpr) Span() tty.Span { return e.Box }
+func (e *IdenExpr) Span() tty.Span   { return e.Tok }
+func (e *DotExpr) Span() tty.Span    { return e.Row }
+func (e *InfExpr) Span() tty.Span    { return e.Row }
+func (e *PfxExpr) Span() tty.Span    { return e.Row }
+func (e *CallExpr) Span() tty.Span   { return e.Box }
+func (e *ToI64Expr) Span() tty.Span  { return e.Row }
+func (e *ToU64Expr) Span() tty.Span  { return e.Row }
+func (e *ToF64Expr) Span() tty.Span  { return e.Row }
+
+func (e *BasicExpr) Accept(v Visitor)  { v.VisitExpr(e) }
 func (e *StructExpr) Accept(v Visitor) { v.VisitExpr(e) }
-func (e *IdfExpr) Accept(v Visitor)    { v.VisitExpr(e) }
+func (e *IdenExpr) Accept(v Visitor)   { v.VisitExpr(e) }
 func (e *DotExpr) Accept(v Visitor)    { v.VisitExpr(e) }
 func (e *InfExpr) Accept(v Visitor)    { v.VisitExpr(e) }
 func (e *PfxExpr) Accept(v Visitor)    { v.VisitExpr(e) }
@@ -872,9 +957,9 @@ func (e *ToI64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
 func (e *ToU64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
 func (e *ToF64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
 
-func (e *ImmExpr) Object() *typ.Object    { return e.Obj }
+func (e *BasicExpr) Object() *typ.Object  { return e.Obj }
 func (e *StructExpr) Object() *typ.Object { return e.Obj }
-func (e *IdfExpr) Object() *typ.Object    { return e.Obj }
+func (e *IdenExpr) Object() *typ.Object   { return e.Obj }
 func (e *DotExpr) Object() *typ.Object    { return e.Obj }
 func (e *InfExpr) Object() *typ.Object    { return e.Res }
 func (e *PfxExpr) Object() *typ.Object    { return e.Res }
@@ -883,9 +968,9 @@ func (e *ToI64Expr) Object() *typ.Object  { return e.Res }
 func (e *ToU64Expr) Object() *typ.Object  { return e.Res }
 func (e *ToF64Expr) Object() *typ.Object  { return e.Res }
 
-func (*ImmExpr) expr()    {}
+func (*BasicExpr) expr()  {}
 func (*StructExpr) expr() {}
-func (*IdfExpr) expr()    {}
+func (*IdenExpr) expr()   {}
 func (*DotExpr) expr()    {}
 func (*InfExpr) expr()    {}
 func (*PfxExpr) expr()    {}
@@ -893,6 +978,12 @@ func (*CallExpr) expr()   {}
 func (*ToI64Expr) expr()  {}
 func (*ToU64Expr) expr()  {}
 func (*ToF64Expr) expr()  {}
+
+func (d *UseDecl) Span() tty.Span    { return d.Row }
+func (d *VarDecl) Span() tty.Span    { return d.Box }
+func (d *FuncDecl) Span() tty.Span   { return d.Box }
+func (d *StructDecl) Span() tty.Span { return d.Box }
+func (d *EnumDecl) Span() tty.Span   { return d.Box }
 
 func (d *UseDecl) Accept(v Visitor)    { v.VisitDecl(d) }
 func (d *VarDecl) Accept(v Visitor)    { v.VisitDecl(d) }

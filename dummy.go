@@ -12,8 +12,10 @@ func main() {
 			Sub: []tty.Span{
 				&tty.Box{
 					Hint: &tty.Hint{
-						Lit: "in that block",
-						Col: color.New(color.FgYellow),
+						Msg: "in that block",
+						Atr: tty.Atr{
+							Color: *color.New(color.FgYellow),
+						},
 					},
 					Sub: []tty.Span{
 						&tty.Row{
@@ -28,8 +30,10 @@ func main() {
 								},
 								&tty.Row{
 									Hint: &tty.Hint{
-										Lit: "unsupported operation",
-										Col: color.New(color.FgRed),
+										Msg: "unsupported operation",
+										Atr: tty.Atr{
+											Color: *color.New(color.FgRed),
+										},
 									},
 									Ind: 1,
 									Sub: []tty.Mono{

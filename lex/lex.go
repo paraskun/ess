@@ -4,7 +4,15 @@ package lex
 import (
 	"fmt"
 	"unicode"
+
+	"github.com/paraskun/o2/tty"
 )
+
+type Lexeme struct {
+	Type
+
+	Tok *tty.Tok
+}
 
 // Scanner is a source code tokenizer.
 //
@@ -16,175 +24,7 @@ type Scanner struct {
 	buf []rune
 	row int
 	col int
-	prv *Token
-}
-
-func (s *Scanner) Load(buf []rune) {
-	s.buf = buf
-	s.row = 1
-	s.col = 1
-}
-
-// Next returns the next token.
-//
-// In case of an error, returns the next correct
-// token (or EOF, if no such left).
-func (s *Scanner) Next() *Token {
-	s.skip()
-
-	t := &Token{
-		Row: s.row,
-		Col: s.col,
-	}
-
-	if len(s.buf) == 0 {
-		t.TokenType = EOF
-		return t
-	}
-
-	if unicode.IsDigit(s.buf[0]) {
-		return s.nextNum(t)
-	}
-
-	if unicode.IsLetter(s.buf[0]) {
-		return s.nextIdf(t)
-	}
-
-	if s.buf[0] == '"' {
-		return s.nextStr(t)
-	}
-
-	t.Lit = string(s.buf[0:1])
-
-	switch s.buf[0] {
-	case '(':
-		t.TokenType = LP
-	case ')':
-		t.TokenType = RP
-	case '{':
-		t.TokenType = LB
-	case '}':
-		t.TokenType = RB
-	case '[':
-		t.TokenType = LSB
-	case ']':
-		t.TokenType = RSB
-	case ':':
-		t.TokenType = COL
-
-		if len(s.buf) > 1 && s.buf[1] == '=' {
-			t.TokenType = INI
-			t.Lit = string(s.buf[0:2])
-		}
-	case ';':
-		t.TokenType = SEM
-	case ',':
-		t.TokenType = COM
-	case '.':
-		t.TokenType = DOT
-	case '+':
-		t.TokenType = ADD
-	case '-':
-		t.TokenType = UNEG
-
-		switch s.prv.TokenType {
-		case IDF, II64:
-			t.TokenType = SUB
-		}
-	case '*':
-		t.TokenType = MUL
-
-		if len(s.buf) > 1 {
-			switch s.buf[1] {
-			case '*':
-				t.TokenType = POW
-				t.Lit = string(s.buf[0:2])
-			}
-		}
-	case '/':
-		t.TokenType = DIV
-	case '<':
-		t.TokenType = LT
-
-		if len(s.buf) > 1 {
-			switch s.buf[1] {
-			case '<':
-				t.TokenType = SHL
-				t.Lit = string(s.buf[0:2])
-			case '=':
-				t.TokenType = LE
-				t.Lit = string(s.buf[0:2])
-			}
-		}
-	case '>':
-		t.TokenType = GT
-
-		if len(s.buf) > 1 {
-			switch s.buf[1] {
-			case '>':
-				t.TokenType = SHR
-				t.Lit = string(s.buf[0:2])
-			case '=':
-				t.TokenType = GE
-				t.Lit = string(s.buf[0:2])
-			}
-		}
-	case '%':
-		t.TokenType = MOD
-	case '&':
-		t.TokenType = BAND
-
-		if len(s.buf) > 1 {
-			switch s.buf[1] {
-			case '&':
-				t.TokenType = LAND
-				t.Lit = string(s.buf[0:2])
-			}
-		}
-	case '|':
-		t.TokenType = BOR
-
-		if len(s.buf) > 1 {
-			switch s.buf[1] {
-			case '|':
-				t.TokenType = LOR
-				t.Lit = string(s.buf[0:2])
-			}
-		}
-	case '^':
-		t.TokenType = BXOR
-	case '~':
-		t.TokenType = BNEG
-	case '=':
-		t.TokenType = EQ
-
-		if len(s.buf) > 1 {
-			switch s.buf[1] {
-			case '=':
-				t.TokenType = EEQ
-				t.Lit = string(s.buf[0:2])
-			}
-		}
-	case '!':
-		t.TokenType = LNEG
-
-		if len(s.buf) > 1 {
-			switch s.buf[1] {
-			case '=':
-				t.TokenType = NE
-				t.Lit = string(s.buf[0:2])
-			}
-		}
-	default:
-		s.error(fmt.Errorf("unexpected symbol"))
-		return s.Next()
-	}
-
-	s.prv = t
-	s.buf = s.buf[len(t.Lit):]
-	s.col += len(t.Lit)
-
-	return t
+	prv *Lexeme
 }
 
 func (s *Scanner) error(err error) {
@@ -204,10 +44,175 @@ func (s *Scanner) skip() {
 	}
 }
 
-func (s *Scanner) nextNum(t *Token) *Token {
+func (s *Scanner) Load(buf []rune) {
+	s.buf = buf
+	s.row = 1
+	s.col = 1
+}
+
+// Next returns the next lexeme.
+//
+// In case of an error, returns the next correct
+// token (or EOF, if no such left).
+func (s *Scanner) Next() *Lexeme {
+	s.skip()
+
+	t := &Lexeme{Tok: &tty.Tok{}}
+
+	if len(s.buf) == 0 {
+		t.Type = EOF
+		return t
+	}
+
+	if unicode.IsDigit(s.buf[0]) {
+		return s.nextNum(t)
+	}
+
+	if unicode.IsLetter(s.buf[0]) {
+		return s.nextIden(t)
+	}
+
+	if s.buf[0] == '"' {
+		return s.nextStr(t)
+	}
+
+	t.Tok.Lit = string(s.buf[0:1])
+
+	switch s.buf[0] {
+	case '(':
+		t.Type = LP
+	case ')':
+		t.Type = RP
+	case '{':
+		t.Type = LB
+	case '}':
+		t.Type = RB
+	case '[':
+		t.Type = LSB
+	case ']':
+		t.Type = RSB
+	case ':':
+		t.Type = COL
+
+		if len(s.buf) > 1 && s.buf[1] == '=' {
+			t.Type = INI
+			t.Tok.Lit = string(s.buf[0:2])
+		}
+	case ';':
+		t.Type = SEM
+	case ',':
+		t.Type = COM
+	case '.':
+		t.Type = DOT
+	case '+':
+		t.Type = ADD
+	case '-':
+		t.Type = UNEG
+
+		switch s.prv.Type {
+		case IDEN, II64:
+			t.Type = SUB
+		}
+	case '*':
+		t.Type = MUL
+
+		if len(s.buf) > 1 {
+			switch s.buf[1] {
+			case '*':
+				t.Type = POW
+				t.Tok.Lit = string(s.buf[0:2])
+			}
+		}
+	case '/':
+		t.Type = DIV
+	case '<':
+		t.Type = LT
+
+		if len(s.buf) > 1 {
+			switch s.buf[1] {
+			case '<':
+				t.Type = SHL
+				t.Tok.Lit = string(s.buf[0:2])
+			case '=':
+				t.Type = LE
+				t.Tok.Lit = string(s.buf[0:2])
+			}
+		}
+	case '>':
+		t.Type = GT
+
+		if len(s.buf) > 1 {
+			switch s.buf[1] {
+			case '>':
+				t.Type = SHR
+				t.Tok.Lit = string(s.buf[0:2])
+			case '=':
+				t.Type = GE
+				t.Tok.Lit = string(s.buf[0:2])
+			}
+		}
+	case '%':
+		t.Type = MOD
+	case '&':
+		t.Type = BAND
+
+		if len(s.buf) > 1 {
+			switch s.buf[1] {
+			case '&':
+				t.Type = LAND
+				t.Tok.Lit = string(s.buf[0:2])
+			}
+		}
+	case '|':
+		t.Type = BOR
+
+		if len(s.buf) > 1 {
+			switch s.buf[1] {
+			case '|':
+				t.Type = LOR
+				t.Tok.Lit = string(s.buf[0:2])
+			}
+		}
+	case '^':
+		t.Type = BXOR
+	case '~':
+		t.Type = BNEG
+	case '=':
+		t.Type = EQ
+
+		if len(s.buf) > 1 {
+			switch s.buf[1] {
+			case '=':
+				t.Type = EEQ
+				t.Tok.Lit = string(s.buf[0:2])
+			}
+		}
+	case '!':
+		t.Type = LNEG
+
+		if len(s.buf) > 1 {
+			switch s.buf[1] {
+			case '=':
+				t.Type = NE
+				t.Tok.Lit = string(s.buf[0:2])
+			}
+		}
+	default:
+		s.error(fmt.Errorf("unexpected symbol"))
+		return s.Next()
+	}
+
+	s.prv = t
+	s.buf = s.buf[len(t.Tok.Lit):]
+	s.col += len(t.Tok.Lit)
+
+	return t
+}
+
+func (s *Scanner) nextNum(t *Lexeme) *Lexeme {
 	cur := 1
 
-	t.TokenType = II64
+	t.Type = II64
 
 	for len(s.buf) > cur && unicode.IsDigit(s.buf[cur]) {
 		cur += 1
@@ -216,10 +221,10 @@ func (s *Scanner) nextNum(t *Token) *Token {
 	if len(s.buf) > cur {
 		switch s.buf[cur] {
 		case 'u':
-			t.TokenType = IU64
+			t.Type = IU64
 			cur += 1
 		case '.':
-			t.TokenType = IF64
+			t.Type = IF64
 			cur += 1
 
 			if len(s.buf) <= cur || !unicode.IsDigit(s.buf[cur]) {
@@ -250,10 +255,10 @@ func (s *Scanner) nextNum(t *Token) *Token {
 		return s.Next()
 	}
 
-	if t.TokenType == U64 {
-		t.Lit = string(s.buf[:cur-1])
+	if t.Type == U64 {
+		t.Tok.Lit = string(s.buf[:cur-1])
 	} else {
-		t.Lit = string(s.buf[:cur])
+		t.Tok.Lit = string(s.buf[:cur])
 	}
 
 	s.prv = t
@@ -263,27 +268,27 @@ func (s *Scanner) nextNum(t *Token) *Token {
 	return t
 }
 
-func (s *Scanner) nextIdf(t *Token) *Token {
+func (s *Scanner) nextIden(t *Lexeme) *Lexeme {
 	cur := 1
-	t.TokenType = IDF
+	t.Type = IDEN
 
 	for len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur])) {
 		cur += 1
 	}
 
-	t.Lit = string(s.buf[:cur])
+	t.Tok.Lit = string(s.buf[:cur])
 	s.prv = t
 	s.col += cur
 	s.buf = s.buf[cur:]
 
-	if tt, ok := AsKeyword(t.Lit); ok {
-		t.TokenType = tt
+	if tt, ok := AsKeyword(t.Tok.Lit); ok {
+		t.Type = tt
 	}
 
 	return t
 }
 
-func (s *Scanner) nextStr(t *Token) *Token {
+func (s *Scanner) nextStr(t *Lexeme) *Lexeme {
 	cur := 1
 
 	for len(s.buf) > cur {
@@ -303,8 +308,8 @@ func (s *Scanner) nextStr(t *Token) *Token {
 		return s.Next()
 	}
 
-	t.TokenType = STR
-	t.Lit = string(s.buf[1:cur])
+	t.Type = STR
+	t.Tok.Lit = string(s.buf[1:cur])
 	s.prv = t
 	s.col += cur + 1
 	s.buf = s.buf[cur+1:]
