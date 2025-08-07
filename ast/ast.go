@@ -240,6 +240,10 @@ type File struct {
 	Dec []Decl
 }
 
+type Collection interface {
+	Add(s tty.Span)
+}
+
 type options struct{}
 
 type Option func(*options)
@@ -254,74 +258,81 @@ type parser struct {
 	ops *options
 	pkg *mod.Package
 	src *mod.File
-
-	box []*tty.Box
-	row []*tty.Row
+	col []Collection
 }
 
-func (p *parser) newBox(ind int) {
-	box := &tty.Box{Ind: ind}
+func (p *parser) newBox(rowInd, boxInd int) {
+	box := &tty.Box{Pos: tty.Position{
+		Ind: tty.Indent{Row: rowInd, Box: boxInd},
+	}}
 
-	if len(p.box) != 0 {
-		out := p.box[len(p.box)-1]
-		out.Sub = append(out.Sub, box)
+	if len(p.col) != 0 {
+		p.col[len(p.col)-1].Add(box)
 	}
 
-	p.box = append(p.box, box)
+	p.col = append(p.col, box)
 }
 
-func (p *parser) newRow(ind int) {
-	row := &tty.Row{Ind: ind}
+func (p *parser) newRow(rowInd, boxInd int) {
+	box := &tty.Box{Pos: tty.Position{
+		Ind: tty.Indent{Row: rowInd, Box: boxInd},
+	}}
 
-	if len(p.row) != 0 {
-		out := p.row[len(p.row)-1]
-		out.Sub = append(out.Sub, row)
-	} else if len(p.box) != 0 {
-		out := p.box[len(p.box)-1]
-		out.Sub = append(out.Sub, row)
-	} else {
-		panic("out of structure")
+	if len(p.col) != 0 {
+		p.col[len(p.col)-1].Add(box)
 	}
 
-	p.row = append(p.row, row)
+	p.col = append(p.col, box)
 }
 
 func (p *parser) popBox() *tty.Box {
-	if len(p.row) != 0 {
-		panic("we are still have rows")
+	if len(p.col) == 0 {
+		panic("out of structure")
 	}
 
-	box := p.box[len(p.box)-1]
-	p.box = p.box[:len(p.box)-1]
+	box := p.col[len(p.col)-1].(*tty.Box)
+	p.col = p.col[:len(p.col)-1]
 
 	return box
 }
 
 func (p *parser) popRow() *tty.Row {
-	row := p.row[len(p.row)-1]
-	p.row = p.row[:len(p.row)-1]
+	if len(p.col) == 0 {
+		panic("out of structure")
+	}
+
+	row := p.col[len(p.col)-1].(*tty.Row)
+	p.col = p.col[:len(p.col)-1]
 
 	return row
 }
 
-func (p *parser) next(ind int) *lex.Lexeme {
+func (p *parser) scan() *lex.Lexeme {
+	var err error
+	var lex *lex.Lexeme
+
+	for {
+		lex, err = p.lex.Next()
+
+		if err == nil {
+			break
+		}
+
+		fmt.Println(err)
+	}
+
+	return lex
+}
+
+func (p *parser) next(rowInd, boxInd int) *lex.Lexeme {
 	if !p.buf {
 		p.prv = p.cur
-		p.cur = p.lex.Next()
+		p.cur = p.scan()
 	}
 
 	p.buf = false
-	p.cur.Tok.Ind = ind
-
-	if len(p.row) != 0 {
-		row := p.row[len(p.row)-1]
-		row.Sub = append(row.Sub, p.cur.Tok)
-	} else if len(p.box) != 0 {
-		box := p.box[len(p.box)-1]
-		box.Sub = append(box.Sub, p.cur.Tok)
-	} else {
-		panic("out of structure")
-	}
+	p.cur.Tok.Pos.Ind = tty.Indent{Row: rowInd, Box: boxInd}
+	p.col[len(p.col)-1].Add(p.cur.Tok)
 
 	return p.cur
 }
@@ -330,15 +341,15 @@ func (p *parser) peek() *lex.Lexeme {
 	if !p.buf {
 		p.buf = true
 		p.prv = p.cur
-		p.cur = p.lex.Next()
+		p.cur = p.scan()
 	}
 
 	return p.cur
 }
 
-func (p *parser) must(t lex.Type, ind int) *lex.Lexeme {
-	if p.next(ind).Type != t {
-		panic(fmt.Errorf("%v given, but %v expected", p.cur.Type, t))
+func (p *parser) must(t lex.Type, rowInd, boxInd int) *lex.Lexeme {
+	if p.next(rowInd, boxInd).Typ != t {
+		panic(fmt.Errorf("%v given, but %v expected", p.cur.Typ, t))
 	}
 
 	return p.cur
@@ -347,7 +358,7 @@ func (p *parser) must(t lex.Type, ind int) *lex.Lexeme {
 func (p *parser) note(n Node) {
 	f := tty.Frame{
 		Name: p.pkg.Path + "/" + p.src.Name,
-		Sub:  n.Span(),
+		Span: n.Span(),
 	}
 
 	tty.Print(&f)
@@ -384,9 +395,9 @@ func parse(pkg *mod.Package, ops *options) {
 		}
 
 		p.lex.Load([]rune(string(buf)))
-		p.newBox(0)
+		p.newBox(0, 0)
 
-		for p.peek().Type != lex.EOF {
+		for p.peek().Typ != lex.EOF {
 			dec.Dec = append(dec.Dec, p.parseDecl())
 		}
 
@@ -396,17 +407,15 @@ func parse(pkg *mod.Package, ops *options) {
 }
 
 func (p *parser) parseDecl() Decl {
-	switch p.peek().Type {
+	switch p.peek().Typ {
 	case lex.USE:
 		use := p.parseUseDecl()
 		pkg := p.pkg.Mod.Lookup(use.Pkg.Lit)
 
 		if pkg == nil {
-			use.Row.Hint = &tty.Hint{
-				Text: "unknown package",
-				Attr: tty.Attr{
-					Color: *color.New(color.FgRed),
-				},
+			use.Row.Hint.Text = "unknown package"
+			use.Row.Hint.Attr = tty.Attr{
+				Color: *color.New(color.FgRed),
 			}
 
 			p.note(use)
@@ -436,151 +445,165 @@ func (p *parser) parseDecl() Decl {
 }
 
 func (p *parser) parseUseDecl() *UseDecl {
-	p.newRow(0)
-	p.must(lex.USE, 0)
+	p.newRow(0, 0)
+	p.must(lex.USE, 0, 0)
 
 	return &UseDecl{
-		Pkg: p.must(lex.ISTR, 1).Tok,
+		Pkg: p.must(lex.ISTR, 1, 0).Tok,
 		Row: p.popRow(),
 	}
 }
 
 func (p *parser) parseFuncDecl() *FuncDecl {
-	p.newBox(0)
-	p.must(lex.FUNC, 0)
-	p.newRow(0)
-	p.newRow(1)
+	p.newBox(0, 1)
+	p.newRow(0, 0)
+	p.must(lex.FUNC, 0, 0)
+	p.newRow(1, 0)
 
-	res := &FuncDecl{Sym: p.must(lex.IDEN, 0).Tok}
+	res := &FuncDecl{Sym: p.must(lex.IDEN, 0, 0).Tok}
 
-	p.must(lex.LP, 0)
+	p.must(lex.LP, 0, 0)
 
-	for p.peek().Type != lex.RP {
+	for p.peek().Typ != lex.RP {
 		if len(res.Arg) == 0 {
-			res.Arg = append(res.Arg, p.parseNamedField(0))
+			res.Arg = append(res.Arg, p.parseNamedField(0, 0))
 		} else {
-			res.Arg = append(res.Arg, p.parseNamedField(1))
+			res.Arg = append(res.Arg, p.parseNamedField(1, 0))
 		}
 
-		if p.peek().Type != lex.RP {
-			p.must(lex.COM, 0)
+		if p.peek().Typ != lex.RP {
+			p.must(lex.COM, 0, 0)
 		}
 	}
 
-	p.must(lex.RP, 0)
+	p.must(lex.RP, 0, 0)
 
-	if p.peek().Type == lex.LP {
-		p.next(1)
-		res.Ret = p.parseTypeSpec(0)
-		p.must(lex.RP, 0)
+	if p.peek().Typ == lex.LP {
+		p.next(1, 0)
+		res.Ret = p.parseTypeSpec(0, 0)
+		p.must(lex.RP, 0, 0)
 	}
 
 	res.Sig = p.popRow()
 
-	if p.peek().Type == lex.LB {
-		p.next(1)
+	if p.peek().Typ == lex.LB {
+		p.next(1, 0)
 		p.popRow()
 
-		res.Sub = p.parseBlockStmt(2)
+		res.Sub = p.parseBlockStmt(2, 0)
 
-		p.must(lex.RB, 0)
+		p.must(lex.RB, 0, 0)
+	} else {
+		p.popRow()
 	}
+
+	res.Box = p.popBox()
 
 	return res
 }
 
 func (p *parser) parseStructDecl() *StructDecl {
-	p.newBox(0)
-	p.newRow(0)
-	p.must(lex.TYPE, 0)
+	p.newBox(0, 1)
+	p.newRow(0, 0)
+	p.must(lex.TYPE, 0, 0)
 
-	c := &StructDecl{Sym: p.must(lex.IDEN, 1).Tok}
+	res := &StructDecl{Sym: p.must(lex.IDEN, 1, 0).Tok}
 
-	p.must(lex.LB)
+	p.must(lex.LB, 1, 0)
+	p.popRow()
 
-	for p.peek().TokenType != lex.RB {
-		c.Mem = append(c.Mem, p.parseNamedField())
+	for p.peek().Typ != lex.RB {
+		res.Mem = append(res.Mem, p.parseNamedField(2, 0))
 	}
 
-	p.must(lex.RB)
+	p.must(lex.RB, 0, 0)
+	res.Box = p.popBox()
 
-	return c
+	return res
 }
 
 func (p *parser) parseEnumDecl() *EnumDecl {
-	c := &EnumDecl{
-		Tok: p.must(lex.ENUM),
-		Idf: p.must(lex.IDF),
+	p.newBox(0, 1)
+	p.newRow(0, 0)
+	p.must(lex.ENUM, 0, 0)
+
+	res := &EnumDecl{Sym: p.must(lex.IDEN, 1, 0).Tok}
+
+	p.must(lex.LB, 1, 0)
+	p.popRow()
+
+	for p.peek().Typ != lex.RB {
+		res.Mem = append(res.Mem, p.must(lex.IDEN, 2, 0).Tok)
 	}
 
-	p.must(lex.LB)
+	p.must(lex.RB, 0, 0)
+	res.Box = p.popBox()
 
-	for p.peek().TokenType != lex.RB {
-		c.Mem = append(c.Mem, p.must(lex.IDF))
-	}
-
-	p.must(lex.RB)
-
-	return c
+	return res
 }
 
-func (p *parser) parseNamedField(ind int) *NamedField {
-	p.newRow(ind)
+func (p *parser) parseNamedField(rowInd, boxInd int) *NamedField {
+	p.newRow(rowInd, boxInd)
 
 	return &NamedField{
-		Sym: p.must(lex.IDEN, 0).Tok,
-		Typ: p.parseTypeSpec(1),
+		Sym: p.must(lex.IDEN, 0, 0).Tok,
+		Typ: p.parseTypeSpec(1, 0),
 		Row: p.popRow(),
 	}
 }
 
-func (p *parser) parseTypeSpec(ind int) *TypeSpec {
-	switch p.peek().Type {
+func (p *parser) parseTypeSpec(rowInd, boxInd int) *TypeSpec {
+	switch p.peek().Typ {
 	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDEN:
-		return &TypeSpec{Tok: p.next(ind).Tok}
+		return &TypeSpec{Tok: p.next(rowInd, boxInd).Tok}
 	}
 
 	// TODO: error handling
 	panic("type specification expected")
 }
 
-func (p *parser) parseBlockStmt(ind int) *BlockStmt {
-	p.newBox(ind)
+func (p *parser) parseBlockStmt(rowInd, boxInd int) *BlockStmt {
+	p.newBox(rowInd, boxInd)
 
-	r := BlockStmt{
-		Tok: p.must(lex.LB),
+	res := &BlockStmt{}
+
+	for p.peek().Typ != lex.RB {
+		res.Sub = append(res.Sub, p.parseStmt(0, 0))
 	}
 
-	for p.peek().TokenType != lex.RB {
-		r.Body = append(r.Body, p.parseStmt())
-	}
+	res.Box = p.popBox()
 
-	p.must(lex.RB)
-
-	return &r
+	return res
 }
 
-func (p *parser) parseStmt() Stmt {
-	switch p.peek().TokenType {
-	case lex.IDF:
-		idf := p.next()
+func (p *parser) parseStmt(rowInd, boxInd int) Stmt {
+	switch p.peek().Typ {
+	case lex.IDEN:
+		p.newBox(rowInd, boxInd)
+		p.newRow(0, 0)
 
-		if p.peek().TokenType == lex.LP {
-			exe := p.parseCall(idf)
-			p.must(lex.SEM)
+		iden := p.next(0, 0)
+
+		if p.peek().Typ == lex.LP {
+			exe := p.parseCall(iden.Tok)
+
+			p.must(lex.SEM, 0, 0)
+			p.popRow()
+
+			exe.Box = p.popBox()
 
 			return &CallStmt{exe}
 		}
 
-		var cur Expr = &IdfExpr{Tok: idf}
+		var cur Expr = &IdenExpr{Tok: iden.Tok}
 
 		for {
-			switch p.peek().TokenType {
+			switch p.peek().Typ {
 			case lex.DOT:
 				cur = &DotExpr{
-					Tok: p.next(),
 					Ctx: cur,
-					Mem: p.must(lex.IDF),
+					Mem: p.must(lex.IDEN, 0, 0).Tok,
+					Row: p.popRow(),
 				}
 
 				continue
@@ -599,86 +622,116 @@ func (p *parser) parseStmt() Stmt {
 
 		return r
 	case lex.VAR:
-		return p.parseVarStmt()
+		return p.parseVarStmt(rowInd, boxInd)
 	case lex.LET:
-		return p.parseLetStmt()
+		return p.parseLetStmt(rowInd, boxInd)
 	case lex.FOR:
-		return p.parseLoopStmt()
+		return p.parseLoopStmt(rowInd, boxInd)
 	case lex.IF:
-		return p.parseCondStmt()
+		return p.parseCondStmt(rowInd, boxInd)
 	case lex.RET:
-		return p.parseReturnStmt()
+		return p.parseReturnStmt(rowInd, boxInd)
 	}
 
 	panic("statement expected")
 }
 
-func (p *parser) parseCall(tok *lex.Token) *CallExpr {
-	p.next()
+func (p *parser) parseCall(tok *tty.Tok) *CallExpr {
+	exe := &CallExpr{Sym: tok}
 
-	exe := &CallExpr{Tok: tok}
+	p.next(0, 0)
+	p.popRow()
 
-	for p.peek().TokenType != lex.RP {
-		exe.Arg = append(exe.Arg, p.parseExpr0())
+	for p.peek().Typ != lex.RP {
+		exe.Arg = append(exe.Arg, p.parseExpr0(2, 0))
 
-		if p.peek().TokenType != lex.RP {
-			p.must(lex.COM)
+		if p.peek().Typ != lex.RP {
+			p.must(lex.COM, 2, 0)
 		}
 	}
 
-	p.must(lex.RP)
+	p.must(lex.RP, 0, 0)
 
 	return exe
 }
 
-func (p *parser) parseVarStmt() *VarStmt {
-	v := &VarStmt{
-		Tok: p.must(lex.VAR),
-		Idf: p.must(lex.IDF),
-	}
+func (p *parser) parseVarStmt(rowInd, boxInd int) *VarStmt {
+	p.newBox(rowInd, boxInd)
+	p.newRow(0, 0)
+	p.must(lex.VAR, 0, 0)
 
-	p.must(lex.EQ)
-	v.Ini = p.parseExpr0()
+	r := VarStmt{Var: p.must(lex.IDEN, 1, 0).Tok}
 
-	return v
-}
+	p.must(lex.EQ, 1, 0)
+	p.popRow()
 
-func (p *parser) parseLetStmt() *LetStmt {
-	v := &LetStmt{
-		Tok: p.must(lex.LET),
-		Idf: p.must(lex.IDF),
-	}
-
-	p.must(lex.EQ)
-	v.Ini = p.parseExpr0()
-
-	return v
-}
-
-func (p *parser) parseLoopStmt() *LoopStmt {
-	r := LoopStmt{
-		Tok: p.must(lex.FOR),
-	}
-
-	r.Con = p.parseExpr0()
-	r.Rep = p.parseBlockStmt()
+	r.Ini = p.parseExpr0(2, 0)
+	p.must(lex.SEM, 0, 0)
+	r.Box = p.popBox()
 
 	return &r
 }
 
-func (p *parser) parseCondStmt() *CondStmt {
-	r := CondStmt{
-		Tok: p.must(lex.IF),
+func (p *parser) parseLetStmt(rowInd, boxInd int) *LetStmt {
+	p.newBox(rowInd, boxInd)
+	p.newRow(0, 0)
+	p.must(lex.LET, 0, 0)
+
+	r := LetStmt{Var: p.must(lex.IDEN, 1, 0).Tok}
+
+	p.must(lex.EQ, 1, 0)
+	p.popRow()
+
+	r.Ini = p.parseExpr0(2, 0)
+	p.must(lex.SEM, 0, 0)
+	r.Box = p.popBox()
+
+	return &r
+}
+
+func (p *parser) parseLoopStmt(rowInd, boxInd int) *LoopStmt {
+	p.newBox(rowInd, boxInd)
+	p.newRow(0, 0)
+	p.must(lex.FOR, 0, 0)
+	p.popRow()
+
+	r := LoopStmt{Con: p.parseExpr0(2, 0)}
+
+	p.must(lex.LB, 0, 0)
+	r.Sub = p.parseBlockStmt(2, 0)
+	p.must(lex.RB, 0, 0)
+
+	r.Box = p.popBox()
+
+	return &r
+}
+
+func (p *parser) parseCondStmt(rowInd, boxInd int) *CondStmt {
+	p.newBox(rowInd, boxInd)
+	p.newRow(0, 0)
+	p.must(lex.IF, 0, 0)
+	p.popRow()
+
+	r := CondStmt{Con: p.parseExpr0()}
+
+	p.must(lex.LB, 0, 0)
+	r.Pos = p.parseBlockStmt(2, 0)
+
+	p.newRow(0, 0)
+	p.must(lex.RB, 0, 0)
+
+	if p.peek().Typ == lex.ELSE {
+		p.next(1, 0)
+		p.must(lex.LB, 1, 0)
+		p.popRow()
+
+		r.Neg = p.parseBlockStmt(2, 0)
+
+		p.newRow(0, 0)
 	}
 
-	r.Con = p.parseExpr0()
-	r.Pos = p.parseBlockStmt()
-
-	if p.peek().TokenType == lex.ELSE {
-		p.next()
-
-		r.Neg = p.parseBlockStmt()
-	}
+	p.popRow()
+	r.Box = p.popBox()
 
 	return &r
 }

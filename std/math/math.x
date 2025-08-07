@@ -11,7 +11,8 @@ type compound {
   event event
 }
 
-func test(e event, a i64, b i64) {
+func test(e event, a i64, b i64) i64 {
+  return 0;
 }
 
 func getEvent() event {
@@ -38,6 +39,16 @@ func getEvent() event {
       msg: ""
     },
     10, 11
+  );
+
+  let b = 
+    test(
+      event {
+        dev: 0,
+        msg: ""
+      },
+      10, 11
+    )
   );
 
   return 

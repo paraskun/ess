@@ -9,8 +9,7 @@ import (
 )
 
 type Lexeme struct {
-	Type
-
+	Typ Type
 	Tok *tty.Tok
 }
 
@@ -19,16 +18,14 @@ type Lexeme struct {
 // Encountered errors stored in Err slice so that they
 // can be used later in case of fatal in the following stages.
 type Scanner struct {
-	Err []error
-
 	buf []rune
 	row int
 	col int
 	prv *Lexeme
 }
 
-func (s *Scanner) error(err error) {
-	s.Err = append(s.Err, fmt.Errorf("scanner: [ %3d:%3d ] %w", s.row, s.col, err))
+func (s *Scanner) error(err error) error {
+	return fmt.Errorf("scanner: [ %3d:%3d ] %w", s.row, s.col, err)
 }
 
 func (s *Scanner) skip() {
@@ -54,14 +51,14 @@ func (s *Scanner) Load(buf []rune) {
 //
 // In case of an error, returns the next correct
 // token (or EOF, if no such left).
-func (s *Scanner) Next() *Lexeme {
+func (s *Scanner) Next() (*Lexeme, error) {
 	s.skip()
 
 	t := &Lexeme{Tok: &tty.Tok{}}
 
 	if len(s.buf) == 0 {
-		t.Type = EOF
-		return t
+		t.Typ = EOF
+		return t, nil
 	}
 
 	if unicode.IsDigit(s.buf[0]) {
@@ -80,139 +77,141 @@ func (s *Scanner) Next() *Lexeme {
 
 	switch s.buf[0] {
 	case '(':
-		t.Type = LP
+		t.Typ = LP
 	case ')':
-		t.Type = RP
+		t.Typ = RP
 	case '{':
-		t.Type = LB
+		t.Typ = LB
 	case '}':
-		t.Type = RB
+		t.Typ = RB
 	case '[':
-		t.Type = LSB
+		t.Typ = LSB
 	case ']':
-		t.Type = RSB
+		t.Typ = RSB
 	case ':':
-		t.Type = COL
+		t.Typ = COL
 
 		if len(s.buf) > 1 && s.buf[1] == '=' {
-			t.Type = INI
+			t.Typ = INI
 			t.Tok.Lit = string(s.buf[0:2])
 		}
 	case ';':
-		t.Type = SEM
+		t.Typ = SEM
 	case ',':
-		t.Type = COM
+		t.Typ = COM
 	case '.':
-		t.Type = DOT
+		t.Typ = DOT
 	case '+':
-		t.Type = ADD
+		t.Typ = ADD
 	case '-':
-		t.Type = UNEG
+		t.Typ = UNEG
 
-		switch s.prv.Type {
+		switch s.prv.Typ {
 		case IDEN, II64:
-			t.Type = SUB
+			t.Typ = SUB
 		}
 	case '*':
-		t.Type = MUL
+		t.Typ = MUL
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '*':
-				t.Type = POW
+				t.Typ = POW
 				t.Tok.Lit = string(s.buf[0:2])
 			}
 		}
 	case '/':
-		t.Type = DIV
+		t.Typ = DIV
 	case '<':
-		t.Type = LT
+		t.Typ = LT
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '<':
-				t.Type = SHL
+				t.Typ = SHL
 				t.Tok.Lit = string(s.buf[0:2])
 			case '=':
-				t.Type = LE
+				t.Typ = LE
 				t.Tok.Lit = string(s.buf[0:2])
 			}
 		}
 	case '>':
-		t.Type = GT
+		t.Typ = GT
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '>':
-				t.Type = SHR
+				t.Typ = SHR
 				t.Tok.Lit = string(s.buf[0:2])
 			case '=':
-				t.Type = GE
+				t.Typ = GE
 				t.Tok.Lit = string(s.buf[0:2])
 			}
 		}
 	case '%':
-		t.Type = MOD
+		t.Typ = MOD
 	case '&':
-		t.Type = BAND
+		t.Typ = BAND
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '&':
-				t.Type = LAND
+				t.Typ = LAND
 				t.Tok.Lit = string(s.buf[0:2])
 			}
 		}
 	case '|':
-		t.Type = BOR
+		t.Typ = BOR
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '|':
-				t.Type = LOR
+				t.Typ = LOR
 				t.Tok.Lit = string(s.buf[0:2])
 			}
 		}
 	case '^':
-		t.Type = BXOR
+		t.Typ = BXOR
 	case '~':
-		t.Type = BNEG
+		t.Typ = BNEG
 	case '=':
-		t.Type = EQ
+		t.Typ = EQ
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '=':
-				t.Type = EEQ
+				t.Typ = EEQ
 				t.Tok.Lit = string(s.buf[0:2])
 			}
 		}
 	case '!':
-		t.Type = LNEG
+		t.Typ = LNEG
 
 		if len(s.buf) > 1 {
 			switch s.buf[1] {
 			case '=':
-				t.Type = NE
+				t.Typ = NE
 				t.Tok.Lit = string(s.buf[0:2])
 			}
 		}
 	default:
-		s.error(fmt.Errorf("unexpected symbol"))
-		return s.Next()
+		s.buf = s.buf[len(t.Tok.Lit):]
+		s.col += len(t.Tok.Lit)
+
+		return nil, s.error(fmt.Errorf("unexpected symbol"))
 	}
 
 	s.prv = t
 	s.buf = s.buf[len(t.Tok.Lit):]
 	s.col += len(t.Tok.Lit)
 
-	return t
+	return t, nil
 }
 
-func (s *Scanner) nextNum(t *Lexeme) *Lexeme {
+func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, error) {
 	cur := 1
 
-	t.Type = II64
+	t.Typ = II64
 
 	for len(s.buf) > cur && unicode.IsDigit(s.buf[cur]) {
 		cur += 1
@@ -221,19 +220,19 @@ func (s *Scanner) nextNum(t *Lexeme) *Lexeme {
 	if len(s.buf) > cur {
 		switch s.buf[cur] {
 		case 'u':
-			t.Type = IU64
+			t.Typ = IU64
 			cur += 1
 		case '.':
-			t.Type = IF64
+			t.Typ = IF64
 			cur += 1
 
 			if len(s.buf) <= cur || !unicode.IsDigit(s.buf[cur]) {
-				s.error(fmt.Errorf("malformed numeric literal"))
+				err := s.error(fmt.Errorf("malformed numeric literal"))
 
 				s.col += cur
 				s.buf = s.buf[cur:]
 
-				return s.Next()
+				return nil, err
 			}
 
 			for len(s.buf) > cur && unicode.IsDigit(s.buf[cur]) {
@@ -243,7 +242,7 @@ func (s *Scanner) nextNum(t *Lexeme) *Lexeme {
 	}
 
 	if len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) || s.buf[cur] == '.') {
-		s.error(fmt.Errorf("malformed numeric literal"))
+		err := s.error(fmt.Errorf("malformed numeric literal"))
 
 		for len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur])) {
 			cur += 1
@@ -252,10 +251,10 @@ func (s *Scanner) nextNum(t *Lexeme) *Lexeme {
 		s.col += cur
 		s.buf = s.buf[cur:]
 
-		return s.Next()
+		return nil, err
 	}
 
-	if t.Type == U64 {
+	if t.Typ == U64 {
 		t.Tok.Lit = string(s.buf[:cur-1])
 	} else {
 		t.Tok.Lit = string(s.buf[:cur])
@@ -265,12 +264,12 @@ func (s *Scanner) nextNum(t *Lexeme) *Lexeme {
 	s.col += cur
 	s.buf = s.buf[cur:]
 
-	return t
+	return t, nil
 }
 
-func (s *Scanner) nextIden(t *Lexeme) *Lexeme {
+func (s *Scanner) nextIden(t *Lexeme) (*Lexeme, error) {
 	cur := 1
-	t.Type = IDEN
+	t.Typ = IDEN
 
 	for len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur])) {
 		cur += 1
@@ -282,16 +281,25 @@ func (s *Scanner) nextIden(t *Lexeme) *Lexeme {
 	s.buf = s.buf[cur:]
 
 	if tt, ok := AsKeyword(t.Tok.Lit); ok {
-		t.Type = tt
+		t.Typ = tt
 	}
 
-	return t
+	return t, nil
 }
 
-func (s *Scanner) nextStr(t *Lexeme) *Lexeme {
+func (s *Scanner) nextStr(t *Lexeme) (*Lexeme, error) {
 	cur := 1
 
 	for len(s.buf) > cur {
+		if s.buf[cur] == '\n' {
+			err := s.error(fmt.Errorf("malformed string literal"))
+
+			s.col += cur + 1
+			s.buf = s.buf[cur+1:]
+
+			return nil, err
+		}
+
 		if s.buf[cur] == '"' && s.buf[cur-1] != '\\' {
 			break
 		}
@@ -300,19 +308,19 @@ func (s *Scanner) nextStr(t *Lexeme) *Lexeme {
 	}
 
 	if len(s.buf) <= cur || s.buf[cur] != '"' {
-		s.error(fmt.Errorf("malformed string literal"))
+		err := s.error(fmt.Errorf("malformed string literal"))
 
 		s.col += cur
 		s.buf = s.buf[cur:]
 
-		return s.Next()
+		return nil, err
 	}
 
-	t.Type = STR
-	t.Tok.Lit = string(s.buf[1:cur])
+	t.Typ = STR
+	t.Tok.Lit = string(s.buf[:cur])
 	s.prv = t
 	s.col += cur + 1
 	s.buf = s.buf[cur+1:]
 
-	return t
+	return t, nil
 }
