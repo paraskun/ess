@@ -3,13 +3,15 @@
 
 #include <stdint.h>
 
+// o2_seg is a type of package segment.
 typedef enum o2_seg
 {
     TEXT = 0x0,
     DATA = 0x1,
 } o2_seg;
 
-typedef struct o2_sym
+// o2_sym is a defined symbol entry.
+typedef struct [[gnu::packed]] o2_sym
 {
     uint32_t idf;
     uint32_t off; // INT_MAX for native
@@ -17,8 +19,10 @@ typedef struct o2_sym
     o2_seg seg;
 } o2_sym;
 
-typedef struct o2_rel
+// o2_rel is a relocation entry.
+typedef struct [[gnu::packed]] o2_rel
 {
+    uint32_t mod;
     uint32_t pkg;
     uint32_t idf;
     uint32_t off;
@@ -26,7 +30,8 @@ typedef struct o2_rel
     o2_seg seg;
 } o2_rel;
 
-typedef struct o2_pkg
+// o2_pkg is a precompiled package.
+typedef struct [[gnu::packed]] o2_pkg
 {
     uint32_t psz;
     uint32_t tsz;
@@ -34,25 +39,19 @@ typedef struct o2_pkg
     uint32_t ssz;
     uint32_t rsz;
 
-    uint8_t *name; // name = data (first string)
     uint8_t *text;
     uint8_t *data;
 
-    struct o2_sym *sym; // symbol table
-    struct o2_rel *rel; // relocation table
+    struct o2_sym *sym;
+    struct o2_rel *rel;
 
     void *nat; // native handler, maybe null
 } o2_pkg;
 
 /**
- *  pkg_srh used to search package at given endpoint.
+ *  o2_pkg_lup used to lookup for a precompiled package by the given fully qualified name.
  */
-int o2_pkg_srh(const char *url, struct o2_pkg **pkg);
-
-/**
- *  pkg_map used to setup segment pointers.
- */
-int o2_pkg_map(struct o2_pkg *pkg);
+int o2_pkg_lup(const char *mod, const char *pkg, struct o2_pkg **ptr);
 
 /**
  *  pkg_rip used to unmount given package.

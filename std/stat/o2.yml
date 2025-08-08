@@ -1,0 +1,4 @@
+module:
+  name: github.com/paraskun/o2/mod/stat
+  uses:
+    - github.com/paraskun/o2/mod/math:v1.0.0
