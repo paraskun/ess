@@ -23,12 +23,19 @@ type Position struct {
 
 type Span interface {
 	Position() *Position
+	Hint() *Hint
 
 	Draw(w io.Writer)
 	More() bool
 	Size(i bool) (int, int)
 
 	getHint() *Hint
+}
+
+type Container interface {
+	Span
+
+	Add(s Span, row, box int)
 }
 
 type Mono interface {
@@ -50,7 +57,7 @@ type Hint struct {
 }
 
 type Tok struct {
-	Hint Hint
+	hint Hint
 
 	Lit string
 	Pos Position
@@ -58,6 +65,10 @@ type Tok struct {
 
 func (t *Tok) Position() *Position {
 	return &t.Pos
+}
+
+func (t *Tok) Hint() *Hint {
+	return &t.hint
 }
 
 func (t *Tok) Draw(w io.Writer) {
@@ -82,11 +93,13 @@ func (t *Tok) Size(i bool) (int, int) {
 }
 
 func (t *Tok) getHint() *Hint {
-	if t.Hint.Text != "" {
-		t.Hint.size, _ = t.Size(false)
-		t.Hint.offset = t.Pos.Ind.Row
+	h := t.Hint()
 
-		return &t.Hint
+	if h.Text != "" {
+		h.size, _ = t.Size(false)
+		h.offset = t.Pos.Ind.Row
+
+		return h
 	}
 
 	return nil
@@ -95,7 +108,7 @@ func (t *Tok) getHint() *Hint {
 func (*Tok) mono() {}
 
 type Row struct {
-	Hint Hint
+	hint Hint
 
 	Pos Position
 	Sub []Mono
@@ -103,14 +116,21 @@ type Row struct {
 	size int
 }
 
-func (r *Row) Add(s Span) {
+func (r *Row) Add(s Span, row, box int) {
+	s.Position().Ind.Row = row
+	s.Position().Ind.Box = box
+
 	rw, _ := r.Size(false)
 	sw, _ := s.Size(true)
 
-	s.Position().Col = r.Pos.Col + rw + s.Position().Ind.Row
+	s.Position().Col = r.Pos.Col + rw + row
 	r.size += sw
 
 	r.Sub = append(r.Sub, s.(Mono))
+}
+
+func (r *Row) Hint() *Hint {
+	return &r.hint
 }
 
 func (r *Row) Position() *Position {
@@ -156,11 +176,13 @@ func (r *Row) getHint() *Hint {
 		off += ssz
 	}
 
-	if r.Hint.Text != "" {
-		r.Hint.size = r.size
-		r.Hint.offset = r.Pos.Ind.Row
+	h := r.Hint()
 
-		return &r.Hint
+	if h.Text != "" {
+		h.size = r.size
+		h.offset = r.Pos.Ind.Row
+
+		return h
 	}
 
 	return nil
@@ -169,7 +191,7 @@ func (r *Row) getHint() *Hint {
 func (*Row) mono() {}
 
 type Box struct {
-	Hint Hint
+	hint Hint
 
 	Ctl bool
 	Pos Position
@@ -178,23 +200,47 @@ type Box struct {
 	width  int
 	height int
 
-	cur  int
-	ent  int
-	ind  int
-	hint *Hint
+	cur int
+	ent int
+	ind int
+	que *Hint
 }
 
-func (b *Box) Add(s Span) {
+func (b *Box) Add(s Span, row, box int) {
+	s.Position().Ind.Row = row
+	s.Position().Ind.Box = box
+
 	bw, bh := b.Size(false)
 	sw, sh := s.Size(true)
 
-	s.Position().Row = b.Position().Row + bh + s.Position().Ind.Box
-	s.Position().Col = b.Position().Col + s.Position().Ind.Row
+	s.Position().Row = b.Position().Row + bh + box
+	s.Position().Col = b.Position().Col + row
 
 	b.width = max(bw, sw)
 	b.height += sh
 
 	b.Sub = append(b.Sub, s)
+}
+
+func (b *Box) AddLast(m Mono, row int) {
+	l := b.Sub[len(b.Sub)-1]
+
+	switch b := l.(type) {
+	case *Box:
+		b.AddLast(m, row)
+	default:
+		r := &Row{Pos: Position{Ind: Indent{
+			Row: l.Position().Ind.Row,
+			Box: l.Position().Ind.Box,
+		}}}
+
+		r.Add(b, 0, 0)
+		r.Add(m, row, 0)
+	}
+}
+
+func (b *Box) Hint() *Hint {
+	return &b.hint
 }
 
 func (b *Box) Position() *Position {
@@ -218,18 +264,18 @@ func (b *Box) Draw(w io.Writer) {
 			break
 		}
 
-		b.hint = b.Sub[b.ent].getHint()
+		b.que = b.Sub[b.ent].getHint()
 		b.cur = 1
 
-		if b.hint != nil && !mono {
-			b.hint.Attr.Color.Fprintf(w, "┌")
-			b.hint.size -= 1
+		if b.que != nil && !mono {
+			b.que.Attr.Color.Fprintf(w, "┌")
+			b.que.size -= 1
 		}
 
 		b.Sub[b.ent].Draw(w)
 
 		if !b.Sub[b.ent].More() {
-			if b.hint != nil {
+			if b.que != nil {
 				b.cur = 2
 			} else {
 				b.ent += 1
@@ -237,20 +283,20 @@ func (b *Box) Draw(w io.Writer) {
 			}
 		}
 	case 1:
-		if b.hint != nil {
-			if b.hint.size == 1 {
-				b.hint.Attr.Color.Fprintf(w, "├")
+		if b.que != nil {
+			if b.que.size == 1 {
+				b.que.Attr.Color.Fprintf(w, "├")
 			} else {
-				b.hint.Attr.Color.Fprintf(w, "│")
+				b.que.Attr.Color.Fprintf(w, "│")
 			}
 
-			b.hint.size -= 1
+			b.que.size -= 1
 		}
 
 		b.Sub[b.ent].Draw(w)
 
 		if !b.Sub[b.ent].More() {
-			if b.hint != nil {
+			if b.que != nil {
 				b.cur = 2
 			} else {
 				b.ent += 1
@@ -260,21 +306,21 @@ func (b *Box) Draw(w io.Writer) {
 	case 2:
 		switch b.Sub[b.ent].(type) {
 		case Mono:
-			b.hint.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.hint.offset))
-			b.hint.Attr.Color.Fprintf(w, "%s┬", strings.Repeat("─", b.hint.size/2-1))
-			b.hint.Attr.Color.Fprintf(w, "%s", strings.Repeat("─", b.hint.size/2))
+			b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.que.offset))
+			b.que.Attr.Color.Fprintf(w, "%s┬", strings.Repeat("─", b.que.size/2-1))
+			b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat("─", b.que.size/2))
 
 			b.cur = 3
 
 		default:
-			b.hint.Attr.Color.Fprintf(w, "└──── %s", b.hint.Text)
+			b.que.Attr.Color.Fprintf(w, "└──── %s", b.que.Text)
 
 			b.ent += 1
 			b.cur = 0
 		}
 	case 3:
-		b.hint.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.hint.offset+b.hint.size/2-1))
-		b.hint.Attr.Color.Fprintf(w, "╰─ %s", b.hint.Text)
+		b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.que.offset+b.que.size/2-1))
+		b.que.Attr.Color.Fprintf(w, "╰─ %s", b.que.Text)
 
 		b.ent += 1
 		b.cur = 0
@@ -302,11 +348,13 @@ func (b *Box) Size(i bool) (int, int) {
 }
 
 func (b *Box) getHint() *Hint {
-	if b.Hint.Text != "" {
-		b.Hint.size = b.height
-		b.Hint.offset = b.Pos.Ind.Box
+	h := b.Hint()
 
-		return &b.Hint
+	if h.Text != "" {
+		h.size = b.height
+		h.offset = b.Pos.Ind.Box
+
+		return h
 	}
 
 	return nil
@@ -317,6 +365,10 @@ type Frame struct {
 	Span Span
 
 	cur int
+}
+
+func (f *Frame) Hint() *Hint {
+	return nil
 }
 
 func (f *Frame) Position() *Position {
