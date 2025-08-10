@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/fatih/color"
 	"github.com/paraskun/o2/lex"
 	"github.com/paraskun/o2/tty"
 	"github.com/paraskun/o2/typ"
@@ -33,14 +32,14 @@ type (
 	}
 
 	BlockStmt struct {
-		Box tty.Container
+		Box tty.Group
 		Sub []Stmt
 
 		Env *typ.Env
 	}
 
 	VarStmt struct {
-		Box tty.Container
+		Box tty.Group
 		Var *tty.Tok
 		Ini Expr
 
@@ -48,7 +47,7 @@ type (
 	}
 
 	LetStmt struct {
-		Box tty.Container
+		Box tty.Group
 		Var *tty.Tok
 		Ini Expr
 
@@ -56,7 +55,7 @@ type (
 	}
 
 	AssignStmt struct {
-		Box tty.Container
+		Box tty.Group
 		Var Expr
 		Val Expr
 
@@ -64,13 +63,13 @@ type (
 	}
 
 	LoopStmt struct {
-		Box tty.Container
+		Box tty.Group
 		Con Expr
 		Sub *BlockStmt
 	}
 
 	CondStmt struct {
-		Box tty.Container
+		Box tty.Group
 		Con Expr
 		Pos *BlockStmt
 		Neg *BlockStmt
@@ -81,7 +80,7 @@ type (
 	}
 
 	ReturnStmt struct {
-		Box tty.Container
+		Box tty.Group
 		Ret Expr
 	}
 )
@@ -104,13 +103,15 @@ type (
 	}
 
 	StructFieldExpr struct {
-		Box tty.Container
+		Box tty.Group
+		Mem *tty.Tok
 		Val Expr
 	}
 
 	StructExpr struct {
-		Box tty.Container
-		Mem []StructFieldExpr
+		Box tty.Group
+		Sym *tty.Tok
+		Mem []*StructFieldExpr
 
 		Obj *typ.Object
 	}
@@ -122,7 +123,7 @@ type (
 	}
 
 	DotExpr struct {
-		Box tty.Container
+		Box tty.Group
 		Mem *tty.Tok
 		Ctx Expr
 
@@ -130,7 +131,7 @@ type (
 	}
 
 	InfExpr struct {
-		Box tty.Container
+		Box tty.Group
 		X   Expr
 		Y   Expr
 
@@ -138,14 +139,14 @@ type (
 	}
 
 	PfxExpr struct {
-		Box tty.Container
+		Box tty.Group
 		X   Expr
 
 		Res *typ.Object
 	}
 
 	CallExpr struct {
-		Box tty.Container
+		Box tty.Group
 		Sym *tty.Tok
 		Arg []Expr
 
@@ -154,24 +155,29 @@ type (
 	}
 
 	ToI64Expr struct {
-		Box tty.Container
+		Box tty.Group
 		X   Expr
 
 		Res *typ.Object
 	}
 
 	ToU64Expr struct {
-		Box tty.Container
+		Box tty.Group
 		X   Expr
 
 		Res *typ.Object
 	}
 
 	ToF64Expr struct {
-		Box tty.Container
+		Box tty.Group
 		X   Expr
 
 		Res *typ.Object
+	}
+
+	GroupExpr struct {
+		Box tty.Group
+		Sub Expr
 	}
 )
 
@@ -185,7 +191,7 @@ type (
 	}
 
 	UseDecl struct {
-		Box tty.Container
+		Box tty.Group
 		Pkg *tty.Tok
 
 		Obj *typ.Object
@@ -201,13 +207,13 @@ type (
 	}
 
 	NamedField struct {
-		Box tty.Container
+		Box tty.Group
 		Sym *tty.Tok
 		Typ *TypeSpec
 	}
 
 	FuncDecl struct {
-		Box tty.Container
+		Box tty.Group
 		Sig *tty.Row
 		Sym *tty.Tok
 		Arg []*NamedField
@@ -219,7 +225,7 @@ type (
 	}
 
 	StructDecl struct {
-		Box tty.Container
+		Box tty.Group
 		Sym *tty.Tok
 		Mem []*NamedField
 
@@ -227,7 +233,7 @@ type (
 	}
 
 	EnumDecl struct {
-		Box tty.Container
+		Box tty.Group
 		Sym *tty.Tok
 		Mem []*tty.Tok
 
@@ -254,7 +260,6 @@ type parser struct {
 	ops *options
 	pkg *mod.Package
 	src *mod.File
-	que []tty.Container
 }
 
 func (p *parser) scan() *lex.Lexeme {
@@ -373,12 +378,7 @@ func (p *parser) parseDecl() Decl {
 		pkg := p.pkg.Mod.Lookup(use.Pkg.Lit)
 
 		if pkg == nil {
-			use.Box.Hint().Text = "unknown package"
-			use.Box.Hint().Attr = tty.Attr{
-				Color: *color.New(color.FgRed),
-			}
-
-			p.note(use)
+			panic("unknown package")
 		}
 
 		use.Obj = &typ.Object{
@@ -577,16 +577,10 @@ func (p *parser) parseStmt() Stmt {
 		iden := p.next()
 
 		if p.peek().Typ == lex.LP {
-			exe := p.parseCall(iden.Tok)
+			res := p.parseCall(iden.Tok)
+			res.Box.InsertEnd(p.must(lex.SEM).Tok, 0)
 
-			switch b := exe.Box.(type) {
-			case *tty.Box:
-				b.AddLast(p.must(lex.SEM).Tok, 0)
-			case *tty.Row:
-				b.Add(p.must(lex.SEM).Tok, 0, 0)
-			}
-
-			return &CallStmt{exe}
+			return &CallStmt{res}
 		}
 
 		var cur Expr = &IdenExpr{Tok: iden.Tok}
@@ -623,14 +617,11 @@ func (p *parser) parseStmt() Stmt {
 		switch b := res.Val.Span().(type) {
 		case *tty.Box:
 			res.Box = &tty.Box{}
-
-			b.AddLast(p.must(lex.SEM).Tok, 0)
-
+			b.InsertEnd(p.must(lex.SEM).Tok, 0)
 			res.Box.Add(top, 0, 0)
 			res.Box.Add(b, 4, 0)
 		case tty.Mono:
 			res.Box = &tty.Row{}
-
 			res.Box.Add(top, 0, 0)
 			res.Box.Add(b, 1, 0)
 			res.Box.Add(p.must(lex.SEM).Tok, 0, 0)
@@ -674,10 +665,10 @@ func (p *parser) parseCall(sym *tty.Tok) *CallExpr {
 			box.Add(b, 4, 0)
 
 			if p.peek().Typ != lex.RP {
-				box.AddLast(p.must(lex.COM).Tok, 0)
+				box.InsertEnd(p.must(lex.COM).Tok, 0)
 				row = &tty.Row{}
 			} else {
-				box.AddLast(p.must(lex.RP).Tok, 0)
+				box.InsertEnd(p.must(lex.RP).Tok, 0)
 			}
 		case tty.Mono:
 			if len(row.Sub) != 0 {
@@ -708,6 +699,7 @@ func (p *parser) parseCall(sym *tty.Tok) *CallExpr {
 func (p *parser) parseVarStmt() *VarStmt {
 	top := &tty.Row{}
 	top.Add(p.must(lex.VAR).Tok, 0, 0)
+
 	res := &VarStmt{Var: p.must(lex.IDEN).Tok}
 	top.Add(res.Var, 1, 0)
 	top.Add(p.must(lex.EQ).Tok, 1, 0)
@@ -717,23 +709,20 @@ func (p *parser) parseVarStmt() *VarStmt {
 	switch b := res.Ini.Span().(type) {
 	case *tty.Box:
 		res.Box = &tty.Box{}
-
 		res.Box.Add(top, 0, 0)
 		res.Box.Add(b, 4, 0)
-
-		b.AddLast(p.must(lex.SEM).Tok, 0)
 	case tty.Mono:
 		res.Box = &tty.Row{}
-
 		res.Box.Add(top, 0, 0)
 		res.Box.Add(b, 1, 0)
-		res.Box.Add(p.must(lex.SEM).Tok, 0, 0)
 	}
+
+	res.Box.InsertEnd(p.must(lex.SEM).Tok, 0)
 
 	return res
 }
 
-func (p *parser) parseLetStmt(rowInd, boxInd int) *LetStmt {
+func (p *parser) parseLetStmt() *LetStmt {
 	top := &tty.Row{}
 	top.Add(p.must(lex.LET).Tok, 0, 0)
 	res := &LetStmt{Var: p.must(lex.IDEN).Tok}
@@ -747,13 +736,13 @@ func (p *parser) parseLetStmt(rowInd, boxInd int) *LetStmt {
 		res.Box = &tty.Box{}
 		res.Box.Add(top, 0, 0)
 		res.Box.Add(b, 4, 0)
-		b.AddLast(p.must(lex.SEM).Tok, 0)
 	case tty.Mono:
 		res.Box = &tty.Row{}
 		res.Box.Add(top, 0, 0)
 		res.Box.Add(b, 1, 0)
-		res.Box.Add(p.must(lex.SEM).Tok, 0, 0)
 	}
+
+	res.Box.InsertEnd(p.must(lex.SEM).Tok, 0)
 
 	return res
 }
@@ -765,7 +754,7 @@ func (p *parser) parseLoopStmt() *LoopStmt {
 		Con: p.parseExpr0(),
 	}
 
-	var log tty.Container
+	var log tty.Group
 
 	switch res.Con.Span().(type) {
 	case *tty.Box:
@@ -788,7 +777,7 @@ func (p *parser) parseLoopStmt() *LoopStmt {
 	return res
 }
 
-func (p *parser) parseCondStmt(rowInd, boxInd int) *CondStmt {
+func (p *parser) parseCondStmt() *CondStmt {
 	tok := p.must(lex.IF).Tok
 	box := &tty.Box{}
 	res := &CondStmt{
@@ -796,7 +785,7 @@ func (p *parser) parseCondStmt(rowInd, boxInd int) *CondStmt {
 		Con: p.parseExpr0(),
 	}
 
-	var log tty.Container
+	var log tty.Group
 
 	switch res.Con.Span().(type) {
 	case *tty.Box:
@@ -817,8 +806,8 @@ func (p *parser) parseCondStmt(rowInd, boxInd int) *CondStmt {
 	box.Add(p.must(lex.RB).Tok, 0, 0)
 
 	if p.peek().Typ == lex.ELSE {
-		box.AddLast(p.next().Tok, 1)
-		box.AddLast(p.must(lex.LB).Tok, 1)
+		box.InsertEnd(p.next().Tok, 1)
+		box.InsertEnd(p.must(lex.LB).Tok, 1)
 		res.Neg = p.parseBlockStmt()
 		box.Add(res.Neg.Box, 4, 0)
 		box.Add(p.must(lex.RB).Tok, 0, 0)
@@ -828,32 +817,71 @@ func (p *parser) parseCondStmt(rowInd, boxInd int) *CondStmt {
 }
 
 func (p *parser) parseReturnStmt() *ReturnStmt {
-	r := ReturnStmt{Tok: p.must(lex.RET)}
+	res := &ReturnStmt{}
+	top := &tty.Row{}
 
-	for p.peek().TokenType != lex.SEM {
-		r.Ret = p.parseExpr0()
+	top.Add(p.must(lex.RET).Tok, 0, 0)
 
-		if p.peek().TokenType != lex.SEM {
-			p.must(lex.COM)
+	if p.peek().Typ == lex.SEM {
+		res.Box = top
+	} else {
+		res.Ret = p.parseExpr0()
+
+		switch rb := res.Ret.Span().(type) {
+		case *tty.Box:
+			box := &tty.Box{}
+			box.Add(top, 0, 0)
+			box.Add(rb, 4, 0)
+			res.Box = box
+		case tty.Mono:
+			top.Add(rb, 1, 0)
+			res.Box = top
 		}
+
 	}
 
-	p.must(lex.SEM)
+	res.Box.InsertEnd(p.must(lex.SEM).Tok, 0)
 
-	return &r
+	return res
 }
 
 func (p *parser) parseExpr0() Expr {
 	cur := p.parseExpr1()
 
 	for {
-		switch p.peek().TokenType {
+		switch p.peek().Typ {
 		case lex.LAND, lex.LOR:
-			cur = &InfExpr{
-				Tok: p.next(),
-				X:   cur,
-				Y:   p.parseExpr1(),
+			tok := p.next().Tok
+			res := &InfExpr{
+				X: cur,
+				Y: p.parseExpr1(),
 			}
+
+			switch yb := res.Y.Span().(type) {
+			case *tty.Box:
+				yb.InsertBeg(tok, 1)
+
+				res.Box = &tty.Box{}
+				res.Box.Add(cur.Span(), 0, 0)
+				res.Box.Add(yb, 4, 0)
+			case tty.Mono:
+				row := &tty.Row{}
+				row.Add(tok, 0, 0)
+				row.Add(yb, 1, 0)
+
+				switch xb := cur.Span().(type) {
+				case *tty.Box:
+					xb.InsertEnd(row, 1)
+
+					res.Box = xb
+				case tty.Mono:
+					res.Box = &tty.Row{}
+					res.Box.Add(xb, 0, 0)
+					res.Box.Add(row, 1, 0)
+				}
+			}
+
+			cur = res
 
 			continue
 		}
@@ -868,13 +896,39 @@ func (p *parser) parseExpr1() Expr {
 	cur := p.parseExpr2()
 
 	for {
-		switch p.peek().TokenType {
+		switch p.peek().Typ {
 		case lex.LT, lex.GT, lex.LE, lex.GE, lex.NE, lex.EEQ:
-			cur = &InfExpr{
-				Tok: p.next(),
-				X:   cur,
-				Y:   p.parseExpr2(),
+			tok := p.next().Tok
+			res := &InfExpr{
+				X: cur,
+				Y: p.parseExpr2(),
 			}
+
+			switch yb := res.Y.Span().(type) {
+			case *tty.Box:
+				yb.InsertBeg(tok, 1)
+
+				res.Box = &tty.Box{}
+				res.Box.Add(cur.Span(), 0, 0)
+				res.Box.Add(yb, 4, 0)
+			case tty.Mono:
+				row := &tty.Row{}
+				row.Add(tok, 0, 0)
+				row.Add(yb, 1, 0)
+
+				switch xb := cur.Span().(type) {
+				case *tty.Box:
+					xb.InsertEnd(row, 1)
+
+					res.Box = xb
+				case tty.Mono:
+					res.Box = &tty.Row{}
+					res.Box.Add(xb, 0, 0)
+					res.Box.Add(row, 1, 0)
+				}
+			}
+
+			cur = res
 
 			continue
 		}
@@ -883,19 +937,46 @@ func (p *parser) parseExpr1() Expr {
 	}
 
 	return cur
+
 }
 
 func (p *parser) parseExpr2() Expr {
 	cur := p.parseExpr3()
 
 	for {
-		switch p.peek().TokenType {
+		switch p.peek().Typ {
 		case lex.SHL, lex.SHR, lex.BAND, lex.BOR, lex.BXOR:
-			cur = &InfExpr{
-				Tok: p.next(),
-				X:   cur,
-				Y:   p.parseExpr3(),
+			tok := p.next().Tok
+			res := &InfExpr{
+				X: cur,
+				Y: p.parseExpr3(),
 			}
+
+			switch yb := res.Y.Span().(type) {
+			case *tty.Box:
+				yb.InsertBeg(tok, 1)
+
+				res.Box = &tty.Box{}
+				res.Box.Add(cur.Span(), 0, 0)
+				res.Box.Add(yb, 4, 0)
+			case tty.Mono:
+				row := &tty.Row{}
+				row.Add(tok, 0, 0)
+				row.Add(yb, 1, 0)
+
+				switch xb := cur.Span().(type) {
+				case *tty.Box:
+					xb.InsertEnd(row, 1)
+
+					res.Box = xb
+				case tty.Mono:
+					res.Box = &tty.Row{}
+					res.Box.Add(xb, 0, 0)
+					res.Box.Add(row, 1, 0)
+				}
+			}
+
+			cur = res
 
 			continue
 		}
@@ -910,13 +991,39 @@ func (p *parser) parseExpr3() Expr {
 	cur := p.parseExpr4()
 
 	for {
-		switch p.peek().TokenType {
+		switch p.peek().Typ {
 		case lex.ADD, lex.SUB:
-			cur = &InfExpr{
-				Tok: p.next(),
-				X:   cur,
-				Y:   p.parseExpr4(),
+			tok := p.next().Tok
+			res := &InfExpr{
+				X: cur,
+				Y: p.parseExpr4(),
 			}
+
+			switch yb := res.Y.Span().(type) {
+			case *tty.Box:
+				yb.InsertBeg(tok, 1)
+
+				res.Box = &tty.Box{}
+				res.Box.Add(cur.Span(), 0, 0)
+				res.Box.Add(yb, 4, 0)
+			case tty.Mono:
+				row := &tty.Row{}
+				row.Add(tok, 0, 0)
+				row.Add(yb, 1, 0)
+
+				switch xb := cur.Span().(type) {
+				case *tty.Box:
+					xb.InsertEnd(row, 1)
+
+					res.Box = xb
+				case tty.Mono:
+					res.Box = &tty.Row{}
+					res.Box.Add(xb, 0, 0)
+					res.Box.Add(row, 1, 0)
+				}
+			}
+
+			cur = res
 
 			continue
 		}
@@ -931,13 +1038,39 @@ func (p *parser) parseExpr4() Expr {
 	cur := p.parseExpr5()
 
 	for {
-		switch p.peek().TokenType {
+		switch p.peek().Typ {
 		case lex.MUL, lex.DIV, lex.MOD, lex.POW:
-			cur = &InfExpr{
-				Tok: p.next(),
-				X:   cur,
-				Y:   p.parseExpr5(),
+			tok := p.next().Tok
+			res := &InfExpr{
+				X: cur,
+				Y: p.parseExpr5(),
 			}
+
+			switch yb := res.Y.Span().(type) {
+			case *tty.Box:
+				yb.InsertBeg(tok, 1)
+
+				res.Box = &tty.Box{}
+				res.Box.Add(cur.Span(), 0, 0)
+				res.Box.Add(yb, 4, 0)
+			case tty.Mono:
+				row := &tty.Row{}
+				row.Add(tok, 0, 0)
+				row.Add(yb, 1, 0)
+
+				switch xb := cur.Span().(type) {
+				case *tty.Box:
+					xb.InsertEnd(row, 1)
+
+					res.Box = xb
+				case tty.Mono:
+					res.Box = &tty.Row{}
+					res.Box.Add(xb, 0, 0)
+					res.Box.Add(row, 1, 0)
+				}
+			}
+
+			cur = res
 
 			continue
 		}
@@ -949,12 +1082,22 @@ func (p *parser) parseExpr4() Expr {
 }
 
 func (p *parser) parseExpr5() Expr {
-	switch p.peek().TokenType {
+	switch p.peek().Typ {
 	case lex.LNEG, lex.BNEG, lex.UNEG:
-		return &PfxExpr{
-			Tok: p.next(),
-			X:   p.parseExpr5(),
+		tok := p.next().Tok
+		res := &PfxExpr{X: p.parseExpr5()}
+
+		switch sb := res.X.Span().(type) {
+		case *tty.Box:
+			sb.InsertBeg(tok, 0)
+			res.Box = sb
+		case tty.Mono:
+			res.Box = &tty.Row{}
+			res.Box.Add(tok, 0, 0)
+			res.Box.Add(sb, 0, 0)
 		}
+
+		return res
 	}
 
 	return p.parseExpr6()
@@ -964,13 +1107,31 @@ func (p *parser) parseExpr6() Expr {
 	cur := p.parseExpr7()
 
 	for {
-		switch p.peek().TokenType {
+		switch p.peek().Typ {
 		case lex.DOT:
-			cur = &DotExpr{
-				Tok: p.next(),
+			dot := p.next().Tok
+			mem := p.must(lex.IDEN).Tok
+			row := &tty.Row{}
+
+			row.Add(dot, 0, 0)
+			row.Add(mem, 0, 0)
+
+			res := &DotExpr{
 				Ctx: cur,
-				Mem: p.must(lex.IDF),
+				Mem: mem,
 			}
+
+			switch cb := cur.Span().(type) {
+			case *tty.Box:
+				cb.InsertEnd(row, 0)
+				res.Box = cb
+			case tty.Mono:
+				res.Box = &tty.Row{}
+				res.Box.Add(cb, 0, 0)
+				res.Box.Add(row, 0, 0)
+			}
+
+			cur = res
 
 			continue
 		}
@@ -982,74 +1143,162 @@ func (p *parser) parseExpr6() Expr {
 }
 
 func (p *parser) parseExpr7() Expr {
-	switch p.peek().TokenType {
-	case lex.IDF:
-		idf := p.next()
+	switch p.peek().Typ {
+	case lex.IDEN:
+		iden := p.next().Tok
 
-		switch p.peek().TokenType {
+		switch p.peek().Typ {
 		case lex.LP:
-			return p.parseCall(idf)
+			return p.parseCall(iden)
 		case lex.LB:
-			p.next()
+			res := &StructExpr{Sym: iden}
+			top := &tty.Row{}
 
-			exp := &StructExpr{Tok: idf}
+			top.Add(iden, 0, 0)
+			top.Add(p.next().Tok, 0, 0)
 
-			for p.peek().TokenType != lex.RB {
-				tok := p.must(lex.IDF)
-				p.must(lex.COL)
-				val := p.parseExpr0()
+			if p.peek().Typ != lex.RB {
+				res.Box = &tty.Box{}
+				res.Box.Add(top, 0, 0)
 
-				exp.Mem = append(exp.Mem, StructField{
-					Tok: tok,
-					Val: val,
-				})
+				for p.peek().Typ != lex.RB {
+					mem := p.parseStructFieldExpr()
 
-				if p.peek().TokenType != lex.RB {
-					p.must(lex.COM)
+					res.Mem = append(res.Mem, mem)
+					res.Box.Add(mem.Box, 4, 0)
+
+					if p.peek().Typ != lex.RB {
+						mem.Box.InsertEnd(p.must(lex.COM).Tok, 0)
+					}
 				}
+			} else {
+				res.Box = top
 			}
 
-			p.must(lex.RB)
+			res.Box.Add(p.must(lex.RB).Tok, 0, 0)
 
-			return exp
+			return res
 		}
 
-		return &IdfExpr{Tok: idf}
+		return &IdenExpr{Tok: iden}
 	case lex.II64, lex.IU64, lex.IF64, lex.TRUE, lex.FALSE:
-		return &ImmExpr{Tok: p.next()}
+		return &BasicExpr{Tok: p.next().Tok}
 	case lex.I64:
-		exp := &ToI64Expr{Tok: p.next()}
+		res := &ToI64Expr{}
+		top := &tty.Row{}
 
-		p.must(lex.LP)
-		exp.X = p.parseExpr0()
-		p.must(lex.RP)
+		top.Add(p.next().Tok, 0, 0)
+		top.Add(p.must(lex.LP).Tok, 0, 0)
 
-		return exp
+		res.X = p.parseExpr0()
+
+		switch xb := res.X.Span().(type) {
+		case *tty.Box:
+			res.Box = &tty.Box{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(xb, 4, 0)
+		case tty.Mono:
+			res.Box = &tty.Row{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(xb, 0, 0)
+		}
+
+		res.Box.Add(p.must(lex.RP).Tok, 0, 0)
+
+		return res
 	case lex.U64:
-		exp := &ToU64Expr{Tok: p.next()}
+		res := &ToU64Expr{}
+		top := &tty.Row{}
 
-		p.must(lex.LP)
-		exp.X = p.parseExpr0()
-		p.must(lex.RP)
+		top.Add(p.next().Tok, 0, 0)
+		top.Add(p.must(lex.LP).Tok, 0, 0)
 
-		return exp
+		res.X = p.parseExpr0()
+
+		switch xb := res.X.Span().(type) {
+		case *tty.Box:
+			res.Box = &tty.Box{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(xb, 4, 0)
+		case tty.Mono:
+			res.Box = &tty.Row{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(xb, 0, 0)
+		}
+
+		res.Box.Add(p.must(lex.RP).Tok, 0, 0)
+
+		return res
 	case lex.F64:
-		exp := &ToF64Expr{Tok: p.next()}
+		res := &ToF64Expr{}
+		top := &tty.Row{}
 
-		p.must(lex.LP)
-		exp.X = p.parseExpr0()
-		p.must(lex.RP)
+		top.Add(p.next().Tok, 0, 0)
+		top.Add(p.must(lex.LP).Tok, 0, 0)
 
-		return exp
+		res.X = p.parseExpr0()
+
+		switch xb := res.X.Span().(type) {
+		case *tty.Box:
+			res.Box = &tty.Box{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(xb, 4, 0)
+		case tty.Mono:
+			res.Box = &tty.Row{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(xb, 0, 0)
+		}
+
+		res.Box.Add(p.must(lex.RP).Tok, 0, 0)
+
+		return res
 	case lex.LP:
-		p.next()
-		r := p.parseExpr0()
-		p.must(lex.RP)
+		res := &GroupExpr{}
+		tok := p.next().Tok
+		res.Sub = p.parseExpr0()
 
-		return r
+		switch sb := res.Sub.Span().(type) {
+		case *tty.Box:
+			res.Box = &tty.Box{}
+			res.Box.Add(tok, 0, 0)
+			res.Box.Add(sb, 4, 0)
+			res.Box.Add(p.must(lex.RP).Tok, 0, 0)
+		case tty.Mono:
+			res.Box = &tty.Row{}
+			res.Box.Add(tok, 0, 0)
+			res.Box.Add(sb, 0, 0)
+			res.Box.Add(p.must(lex.RP).Tok, 0, 0)
+		}
+
+		return res
 	}
 
 	panic("expression expected")
+}
+
+func (p *parser) parseStructFieldExpr() *StructFieldExpr {
+	res := &StructFieldExpr{}
+	top := &tty.Row{}
+
+	res.Mem = p.must(lex.IDEN).Tok
+
+	top.Add(res.Mem, 0, 0)
+	top.Add(p.must(lex.COL).Tok, 0, 0)
+
+	res.Val = p.parseExpr0()
+
+	switch vb := res.Val.Span().(type) {
+	case *tty.Box:
+		res.Box = &tty.Box{}
+		res.Box.Add(top, 0, 0)
+		res.Box.Add(vb, 4, 0)
+	case tty.Mono:
+		res.Box = &tty.Row{}
+		res.Box.Add(top, 0, 0)
+		res.Box.Add(vb, 1, 0)
+	}
+
+	return res
 }
 
 func (s *ReturnStmt) Span() tty.Span { return s.Box }
@@ -1082,13 +1331,14 @@ func (*CallStmt) stmt()   {}
 func (e *BasicExpr) Span() tty.Span  { return e.Tok }
 func (e *StructExpr) Span() tty.Span { return e.Box }
 func (e *IdenExpr) Span() tty.Span   { return e.Tok }
-func (e *DotExpr) Span() tty.Span    { return e.Row }
-func (e *InfExpr) Span() tty.Span    { return e.Row }
-func (e *PfxExpr) Span() tty.Span    { return e.Row }
+func (e *DotExpr) Span() tty.Span    { return e.Box }
+func (e *InfExpr) Span() tty.Span    { return e.Box }
+func (e *PfxExpr) Span() tty.Span    { return e.Box }
 func (e *CallExpr) Span() tty.Span   { return e.Box }
-func (e *ToI64Expr) Span() tty.Span  { return e.Row }
-func (e *ToU64Expr) Span() tty.Span  { return e.Row }
-func (e *ToF64Expr) Span() tty.Span  { return e.Row }
+func (e *ToI64Expr) Span() tty.Span  { return e.Box }
+func (e *ToU64Expr) Span() tty.Span  { return e.Box }
+func (e *ToF64Expr) Span() tty.Span  { return e.Box }
+func (e *GroupExpr) Span() tty.Span  { return e.Box }
 
 func (e *BasicExpr) Accept(v Visitor)  { v.VisitExpr(e) }
 func (e *StructExpr) Accept(v Visitor) { v.VisitExpr(e) }
@@ -1100,6 +1350,7 @@ func (e *CallExpr) Accept(v Visitor)   { v.VisitExpr(e) }
 func (e *ToI64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
 func (e *ToU64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
 func (e *ToF64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
+func (e *GroupExpr) Accept(v Visitor)  { v.VisitExpr(e) }
 
 func (e *BasicExpr) Object() *typ.Object  { return e.Obj }
 func (e *StructExpr) Object() *typ.Object { return e.Obj }
@@ -1111,6 +1362,7 @@ func (e *CallExpr) Object() *typ.Object   { return e.Ret }
 func (e *ToI64Expr) Object() *typ.Object  { return e.Res }
 func (e *ToU64Expr) Object() *typ.Object  { return e.Res }
 func (e *ToF64Expr) Object() *typ.Object  { return e.Res }
+func (e *GroupExpr) Object() *typ.Object  { return e.Sub.Object() }
 
 func (*BasicExpr) expr()  {}
 func (*StructExpr) expr() {}
@@ -1122,8 +1374,9 @@ func (*CallExpr) expr()   {}
 func (*ToI64Expr) expr()  {}
 func (*ToU64Expr) expr()  {}
 func (*ToF64Expr) expr()  {}
+func (*GroupExpr) expr()  {}
 
-func (d *UseDecl) Span() tty.Span    { return d.Row }
+func (d *UseDecl) Span() tty.Span    { return d.Box }
 func (d *VarDecl) Span() tty.Span    { return d.Box }
 func (d *FuncDecl) Span() tty.Span   { return d.Box }
 func (d *StructDecl) Span() tty.Span { return d.Box }

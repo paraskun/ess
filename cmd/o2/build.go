@@ -19,7 +19,7 @@ var build = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		mod := &mod.Module{
-			Version: env.Version{},
+			Version: mod.Version{},
 		}
 
 		if err := mod.Load("."); err != nil {

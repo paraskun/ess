@@ -16,32 +16,9 @@ type Indent struct {
 }
 
 type Position struct {
-	Row int // including box indentation
-	Col int // including row indentation
+	Row int
+	Col int
 	Ind Indent
-}
-
-type Span interface {
-	Position() *Position
-	Hint() *Hint
-
-	Draw(w io.Writer)
-	More() bool
-	Size(i bool) (int, int)
-
-	getHint() *Hint
-}
-
-type Container interface {
-	Span
-
-	Add(s Span, row, box int)
-}
-
-type Mono interface {
-	Span
-
-	mono()
 }
 
 type Attr struct {
@@ -56,19 +33,40 @@ type Hint struct {
 	offset int
 }
 
-type Tok struct {
-	hint Hint
+type Span interface {
+	Position() *Position
 
+	Draw(w io.Writer)
+	More() bool
+	Size(i bool) (int, int)
+
+	getHint() *Hint
+}
+
+type Group interface {
+	Span
+
+	Add(s Span, ir, ib int)
+
+	InsertBeg(m Mono, ir int)
+	InsertEnd(m Mono, ir int)
+}
+
+type Mono interface {
+	Span
+
+	mono()
+}
+
+type Tok struct {
 	Lit string
 	Pos Position
+
+	hint Hint
 }
 
 func (t *Tok) Position() *Position {
 	return &t.Pos
-}
-
-func (t *Tok) Hint() *Hint {
-	return &t.hint
 }
 
 func (t *Tok) Draw(w io.Writer) {
@@ -93,7 +91,7 @@ func (t *Tok) Size(i bool) (int, int) {
 }
 
 func (t *Tok) getHint() *Hint {
-	h := t.Hint()
+	h := &t.hint
 
 	if h.Text != "" {
 		h.size, _ = t.Size(false)
@@ -108,33 +106,40 @@ func (t *Tok) getHint() *Hint {
 func (*Tok) mono() {}
 
 type Row struct {
-	hint Hint
-
 	Pos Position
 	Sub []Mono
 
+	hint Hint
 	size int
-}
-
-func (r *Row) Add(s Span, row, box int) {
-	s.Position().Ind.Row = row
-	s.Position().Ind.Box = box
-
-	rw, _ := r.Size(false)
-	sw, _ := s.Size(true)
-
-	s.Position().Col = r.Pos.Col + rw + row
-	r.size += sw
-
-	r.Sub = append(r.Sub, s.(Mono))
-}
-
-func (r *Row) Hint() *Hint {
-	return &r.hint
 }
 
 func (r *Row) Position() *Position {
 	return &r.Pos
+}
+
+func (r *Row) Add(s Span, ir, ib int) {
+	s.Position().Ind.Row = ir
+	s.Position().Ind.Box = 0
+
+	r.Sub = append(r.Sub, s.(Mono))
+}
+
+func (r *Row) InsertBeg(m Mono, ir int) {
+	m.Position().Ind.Row = ir
+	m.Position().Ind.Box = 0
+
+	sub := make([]Mono, 0, len(r.Sub)+1)
+	sub = append(sub, m)
+	sub = append(sub, r.Sub...)
+
+	r.Sub = sub
+}
+
+func (r *Row) InsertEnd(m Mono, ir int) {
+	m.Position().Ind.Row = ir
+	m.Position().Ind.Box = 0
+
+	r.Sub = append(r.Sub, m)
 }
 
 func (r *Row) Draw(w io.Writer) {
@@ -176,7 +181,7 @@ func (r *Row) getHint() *Hint {
 		off += ssz
 	}
 
-	h := r.Hint()
+	h := &r.hint
 
 	if h.Text != "" {
 		h.size = r.size
@@ -191,11 +196,11 @@ func (r *Row) getHint() *Hint {
 func (*Row) mono() {}
 
 type Box struct {
-	hint Hint
-
 	Ctl bool
 	Pos Position
 	Sub []Span
+
+	hint Hint
 
 	width  int
 	height int
@@ -206,45 +211,63 @@ type Box struct {
 	que *Hint
 }
 
-func (b *Box) Add(s Span, row, box int) {
-	s.Position().Ind.Row = row
-	s.Position().Ind.Box = box
+func (b *Box) Position() *Position {
+	return &b.Pos
+}
 
-	bw, bh := b.Size(false)
-	sw, sh := s.Size(true)
-
-	s.Position().Row = b.Position().Row + bh + box
-	s.Position().Col = b.Position().Col + row
-
-	b.width = max(bw, sw)
-	b.height += sh
+func (b *Box) Add(s Span, ir, ib int) {
+	s.Position().Ind.Row = ir
+	s.Position().Ind.Box = ib
 
 	b.Sub = append(b.Sub, s)
 }
 
-func (b *Box) AddLast(m Mono, row int) {
+func (b *Box) InsertBeg(m Mono, ir int) {
+	if len(b.Sub) == 0 {
+		b.Add(m, ir, 0)
+		return
+	}
+
+	f := b.Sub[0]
+
+	switch fb := f.(type) {
+	case *Box:
+		fb.InsertBeg(m, ir)
+	default:
+		row := &Row{Pos: Position{Ind: Indent{
+			Row: f.Position().Ind.Row,
+			Box: f.Position().Ind.Box,
+		}}}
+
+		row.Add(m, 0, 0)
+		row.Add(f, ir, 0)
+
+		b.Sub[0] = row
+	}
+}
+
+func (b *Box) InsertEnd(m Mono, ir int) {
+	if len(b.Sub) == 0 {
+		b.Add(m, ir, 0)
+		return
+	}
+
 	l := b.Sub[len(b.Sub)-1]
 
-	switch b := l.(type) {
+	switch lb := l.(type) {
 	case *Box:
-		b.AddLast(m, row)
+		lb.InsertEnd(m, ir)
 	default:
-		r := &Row{Pos: Position{Ind: Indent{
+		row := &Row{Pos: Position{Ind: Indent{
 			Row: l.Position().Ind.Row,
 			Box: l.Position().Ind.Box,
 		}}}
 
-		r.Add(b, 0, 0)
-		r.Add(m, row, 0)
+		row.Add(l, 0, 0)
+		row.Add(m, ir, 0)
+
+		b.Sub[len(b.Sub)-1] = row
 	}
-}
-
-func (b *Box) Hint() *Hint {
-	return &b.hint
-}
-
-func (b *Box) Position() *Position {
-	return &b.Pos
 }
 
 func (b *Box) Draw(w io.Writer) {
@@ -348,7 +371,7 @@ func (b *Box) Size(i bool) (int, int) {
 }
 
 func (b *Box) getHint() *Hint {
-	h := b.Hint()
+	h := &b.hint
 
 	if h.Text != "" {
 		h.size = b.height
