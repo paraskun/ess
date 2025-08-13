@@ -1,0 +1,11 @@
+use "github.com/paraskun/o2/std/math";
+
+func mean(v f64) f64 {
+  var s = 0.0;
+  var c = 0.0; 
+
+  c = math.add(c, 1.0);
+  s = math.add(s, v);
+
+  return s / c;
+}

@@ -25,10 +25,6 @@ func main() {
 
 	dir += "/o2"
 
-	if err := os.MkdirAll(dir+"/src", 0774); err != nil {
-		panic(err)
-	}
-
 	if err := os.MkdirAll(dir+"/mod", 0774); err != nil {
 		panic(err)
 	}

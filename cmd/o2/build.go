@@ -1,40 +1,43 @@
 package main
 
 import (
-	"fmt"
+	"os"
 
+	"github.com/paraskun/o2/ast"
 	"github.com/paraskun/o2/typ/mod"
 	"github.com/spf13/cobra"
 )
 
 var build = &cobra.Command{
 	Use:   "build [package]",
-	Short: "Build compiles specified package.",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 {
-			return fmt.Errorf("requires exactly one argument")
-		}
-
-		return nil
-	},
+	Short: "Build compiles specified package with it's dependencies.",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mod := &mod.Module{
-			Version: mod.Version{},
-		}
+		dir, err := os.Getwd()
 
-		if err := mod.Load("."); err != nil {
+		if err != nil {
 			panic(err)
 		}
 
-		fmt.Printf("%+v\n", mod)
+		m, err := mod.Load(dir)
 
-		pkg := mod.Lookup(args[0])
-
-		if pkg == nil {
-			panic("no such package in context")
+		if err != nil {
+			return err
 		}
 
-		fmt.Printf("%+v\n", pkg)
+		name := m.Mod.Name
+
+		if args[0] != "." {
+			name += "/" + args[0]
+		}
+
+		p := m.Lookup(name)
+
+		if p == nil {
+			panic("no such package current module")
+		}
+
+		ast.Parse(p)
 
 		return nil
 	},

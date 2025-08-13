@@ -208,6 +208,7 @@ type Box struct {
 	cur int
 	ent int
 	ind int
+	mon bool
 	que *Hint
 }
 
@@ -271,26 +272,32 @@ func (b *Box) InsertEnd(m Mono, ir int) {
 }
 
 func (b *Box) Draw(w io.Writer) {
+	if b.ind != 0 {
+		b.ind -= 1
+
+		if b.Ctl {
+			fmt.Fprintln(w)
+		}
+
+		return
+	}
+
 	fmt.Fprintf(w, "%s", strings.Repeat(" ", b.Pos.Ind.Row))
 
 	switch b.cur {
 	case 0:
+		b.ind = b.Sub[b.ent].Position().Ind.Box
+		b.que = b.Sub[b.ent].getHint()
+		_, b.mon = b.Sub[b.ent].(Mono)
+
 		if b.ind != 0 {
 			b.ind -= 1
+			b.cur = 1
+
 			break
 		}
 
-		_, mono := b.Sub[b.ent].(Mono)
-		b.ind = b.Sub[b.ent].Position().Ind.Box
-
-		if b.ind != 0 {
-			break
-		}
-
-		b.que = b.Sub[b.ent].getHint()
-		b.cur = 1
-
-		if b.que != nil && !mono {
+		if b.que != nil && !b.mon {
 			b.que.Attr.Color.Fprintf(w, "┌")
 			b.que.size -= 1
 		}
@@ -305,7 +312,25 @@ func (b *Box) Draw(w io.Writer) {
 				b.cur = 0
 			}
 		}
+
 	case 1:
+		if b.que != nil && !b.mon {
+			b.que.Attr.Color.Fprintf(w, "┌")
+			b.que.size -= 1
+		}
+
+		b.Sub[b.ent].Draw(w)
+
+		if !b.Sub[b.ent].More() {
+			if b.que != nil {
+				b.cur = 2
+			} else {
+				b.ent += 1
+				b.cur = 0
+			}
+		}
+
+	case 2:
 		if b.que != nil {
 			if b.que.size == 1 {
 				b.que.Attr.Color.Fprintf(w, "├")
@@ -320,20 +345,21 @@ func (b *Box) Draw(w io.Writer) {
 
 		if !b.Sub[b.ent].More() {
 			if b.que != nil {
-				b.cur = 2
+				b.cur = 3
 			} else {
 				b.ent += 1
 				b.cur = 0
 			}
 		}
-	case 2:
+
+	case 3:
 		switch b.Sub[b.ent].(type) {
 		case Mono:
 			b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.que.offset))
 			b.que.Attr.Color.Fprintf(w, "%s┬", strings.Repeat("─", b.que.size/2-1))
 			b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat("─", b.que.size/2))
 
-			b.cur = 3
+			b.cur = 4
 
 		default:
 			b.que.Attr.Color.Fprintf(w, "└──── %s", b.que.Text)
@@ -341,7 +367,8 @@ func (b *Box) Draw(w io.Writer) {
 			b.ent += 1
 			b.cur = 0
 		}
-	case 3:
+
+	case 4:
 		b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.que.offset+b.que.size/2-1))
 		b.que.Attr.Color.Fprintf(w, "╰─ %s", b.que.Text)
 
@@ -399,6 +426,8 @@ func (f *Frame) Position() *Position {
 }
 
 func (f *Frame) Draw(w io.Writer) {
+	f.Span.Position().Ind.Row = 2
+
 	switch f.cur {
 	case 0:
 		fmt.Fprintf(w, "╭─[ ")

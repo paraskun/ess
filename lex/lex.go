@@ -54,7 +54,12 @@ func (s *Scanner) Load(buf []rune) {
 func (s *Scanner) Next() (*Lexeme, error) {
 	s.skip()
 
-	t := &Lexeme{Tok: &tty.Tok{}}
+	t := &Lexeme{Tok: &tty.Tok{
+		Pos: tty.Position{
+			Row: s.row,
+			Col: s.col,
+		},
+	}}
 
 	if len(s.buf) == 0 {
 		t.Typ = EOF

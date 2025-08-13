@@ -276,6 +276,8 @@ func (p *parser) scan() *lex.Lexeme {
 		fmt.Println(err)
 	}
 
+	// fmt.Println(lex.Typ, lex.Tok.Lit)
+
 	return lex
 }
 
@@ -304,7 +306,7 @@ func (p *parser) must(t lex.Type) *lex.Lexeme {
 	if p.peek().Typ != t {
 		// TODO: process error
 
-		panic("unexpected token")
+		panic(fmt.Errorf("unexpected token at %d:%d", p.cur.Tok.Pos.Row, p.cur.Tok.Pos.Col))
 	}
 
 	return p.next()
@@ -332,7 +334,7 @@ func Parse(pkg *mod.Package, opts ...Option) {
 func parse(pkg *mod.Package, ops *options) {
 	p := &parser{pkg: pkg, ops: ops}
 
-	for _, src := range pkg.XSrc {
+	for _, src := range pkg.Src {
 		f, err := os.Open(src.Path)
 
 		if err != nil {
@@ -363,11 +365,16 @@ func parse(pkg *mod.Package, ops *options) {
 				ind = 0
 			}
 
-			dec.Dec = append(dec.Dec, p.parseDecl())
+			dec.Dec = append(dec.Dec, sub)
 			dec.Box.Add(sub.Span(), 0, ind)
 		}
 
 		src.Dec = dec
+
+		tty.Print(&tty.Frame{
+			Name: p.src.Name,
+			Span: dec.Box,
+		})
 	}
 }
 
@@ -417,16 +424,16 @@ func (p *parser) parseUseDecl() *UseDecl {
 func (p *parser) parseFuncDecl() *FuncDecl {
 	dec := &FuncDecl{Sig: &tty.Row{}}
 	top := &tty.Row{}
-
 	top.Add(p.must(lex.FUNC).Tok, 0, 0)
+
 	dec.Sym = p.must(lex.IDEN).Tok
-	dec.Sig.Add(dec.Sym, 1, 0)
+	dec.Sig.Add(dec.Sym, 0, 0)
 	dec.Sig.Add(p.must(lex.LP).Tok, 0, 0)
 
 	for p.peek().Typ != lex.RP {
 		ind := 0
 
-		if len(dec.Arg) == 0 {
+		if len(dec.Arg) != 0 {
 			ind = 1
 		}
 
@@ -562,7 +569,7 @@ func (p *parser) parseBlockStmt() *BlockStmt {
 			sub := p.parseStmt()
 
 			res.Sub = append(res.Sub, sub)
-			res.Box.Add(sub.Span(), 4, 0)
+			res.Box.Add(sub.Span(), 0, 0)
 		}
 	} else {
 		res.Box = &tty.Row{}
@@ -725,6 +732,7 @@ func (p *parser) parseVarStmt() *VarStmt {
 func (p *parser) parseLetStmt() *LetStmt {
 	top := &tty.Row{}
 	top.Add(p.must(lex.LET).Tok, 0, 0)
+
 	res := &LetStmt{Var: p.must(lex.IDEN).Tok}
 	top.Add(res.Var, 1, 0)
 	top.Add(p.must(lex.EQ).Tok, 1, 0)

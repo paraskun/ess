@@ -94,6 +94,7 @@ func AsKeyword(lit string) (Type, bool) {
 var kwd = map[string]Type{
 	"use":    USE,
 	"var":    VAR,
+	"let":    LET,
 	"i64":    I64,
 	"u64":    U64,
 	"f64":    F64,
