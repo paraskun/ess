@@ -1,11 +1,12 @@
-// Package lex contains language tokenizer.
 package lex
 
 import (
 	"fmt"
 	"unicode"
 
+	"github.com/fatih/color"
 	"github.com/paraskun/o2/tty"
+	"github.com/paraskun/o2/typ"
 )
 
 type Lexeme struct {
@@ -13,19 +14,11 @@ type Lexeme struct {
 	Tok *tty.Tok
 }
 
-// Scanner is a source code tokenizer.
-//
-// Encountered errors stored in Err slice so that they
-// can be used later in case of fatal in the following stages.
 type Scanner struct {
 	buf []rune
 	row int
 	col int
 	prv *Lexeme
-}
-
-func (s *Scanner) error(err error) error {
-	return fmt.Errorf("scanner: [ %3d:%3d ] %w", s.row, s.col, err)
 }
 
 func (s *Scanner) skip() {
@@ -47,11 +40,7 @@ func (s *Scanner) Load(buf []rune) {
 	s.col = 1
 }
 
-// Next returns the next lexeme.
-//
-// In case of an error, returns the next correct
-// token (or EOF, if no such left).
-func (s *Scanner) Next() (*Lexeme, error) {
+func (s *Scanner) Next() (*Lexeme, *typ.Error) {
 	s.skip()
 
 	t := &Lexeme{Tok: &tty.Tok{
@@ -95,11 +84,6 @@ func (s *Scanner) Next() (*Lexeme, error) {
 		t.Typ = RSB
 	case ':':
 		t.Typ = COL
-
-		if len(s.buf) > 1 && s.buf[1] == '=' {
-			t.Typ = INI
-			t.Tok.Lit = string(s.buf[0:2])
-		}
 	case ';':
 		t.Typ = SEM
 	case ',':
@@ -199,11 +183,21 @@ func (s *Scanner) Next() (*Lexeme, error) {
 				t.Tok.Lit = string(s.buf[0:2])
 			}
 		}
+	case '@':
+		t.Typ = DOG
 	default:
 		s.buf = s.buf[len(t.Tok.Lit):]
 		s.col += len(t.Tok.Lit)
 
-		return nil, s.error(fmt.Errorf("unexpected symbol"))
+		t.Typ = ERR
+		t.Tok.Hint().Text = "unknown symbol"
+		t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
+
+		return nil, &typ.Error{
+			Span: t.Tok,
+			Full: fmt.Sprintf("scanner: unknown symbol at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
+			Help: "verify your input or consider creating string literal",
+		}
 	}
 
 	s.prv = t
@@ -213,7 +207,7 @@ func (s *Scanner) Next() (*Lexeme, error) {
 	return t, nil
 }
 
-func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, error) {
+func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, *typ.Error) {
 	cur := 1
 
 	t.Typ = II64
@@ -232,12 +226,19 @@ func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, error) {
 			cur += 1
 
 			if len(s.buf) <= cur || !unicode.IsDigit(s.buf[cur]) {
-				err := s.error(fmt.Errorf("malformed numeric literal"))
-
-				s.col += cur
 				s.buf = s.buf[cur:]
+				s.col += cur
 
-				return nil, err
+				t.Typ = ERR
+				t.Tok.Lit = string(s.buf[:cur-1])
+				t.Tok.Hint().Text = "malformed floating point literal"
+				t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
+
+				return nil, &typ.Error{
+					Span: t.Tok,
+					Full: fmt.Sprintf("scanner: malfomed floating point literal at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
+					Help: "consider specifying at least one fraction digit",
+				}
 			}
 
 			for len(s.buf) > cur && unicode.IsDigit(s.buf[cur]) {
@@ -247,8 +248,6 @@ func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, error) {
 	}
 
 	if len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) || s.buf[cur] == '.') {
-		err := s.error(fmt.Errorf("malformed numeric literal"))
-
 		for len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur])) {
 			cur += 1
 		}
@@ -256,14 +255,19 @@ func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, error) {
 		s.col += cur
 		s.buf = s.buf[cur:]
 
-		return nil, err
+		t.Typ = ERR
+		t.Tok.Lit = string(s.buf[:cur-1])
+		t.Tok.Hint().Text = "malformed numeric literal"
+		t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
+
+		return nil, &typ.Error{
+			Span: t.Tok,
+			Full: fmt.Sprintf("scanner: malfomed numeric literal at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
+			Help: "verify surrounding expression correctness",
+		}
 	}
 
-	if t.Typ == U64 {
-		t.Tok.Lit = string(s.buf[:cur-1])
-	} else {
-		t.Tok.Lit = string(s.buf[:cur])
-	}
+	t.Tok.Lit = string(s.buf[:cur])
 
 	s.prv = t
 	s.col += cur
@@ -272,7 +276,7 @@ func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, error) {
 	return t, nil
 }
 
-func (s *Scanner) nextIden(t *Lexeme) (*Lexeme, error) {
+func (s *Scanner) nextIden(t *Lexeme) (*Lexeme, *typ.Error) {
 	cur := 1
 	t.Typ = IDEN
 
@@ -292,17 +296,24 @@ func (s *Scanner) nextIden(t *Lexeme) (*Lexeme, error) {
 	return t, nil
 }
 
-func (s *Scanner) nextStr(t *Lexeme) (*Lexeme, error) {
+func (s *Scanner) nextStr(t *Lexeme) (*Lexeme, *typ.Error) {
 	cur := 1
 
 	for len(s.buf) > cur {
 		if s.buf[cur] == '\n' {
-			err := s.error(fmt.Errorf("malformed string literal"))
-
 			s.col += cur + 1
 			s.buf = s.buf[cur+1:]
 
-			return nil, err
+			t.Typ = ERR
+			t.Tok.Lit = string(s.buf[:cur])
+			t.Tok.Hint().Text = "malformed (broken) string literal"
+			t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
+
+			return nil, &typ.Error{
+				Span: t.Tok,
+				Full: fmt.Sprintf("scanner: malfomed string literal at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
+				Help: "consider inlining the string",
+			}
 		}
 
 		if s.buf[cur] == '"' && s.buf[cur-1] != '\\' {
@@ -313,16 +324,24 @@ func (s *Scanner) nextStr(t *Lexeme) (*Lexeme, error) {
 	}
 
 	if len(s.buf) <= cur || s.buf[cur] != '"' {
-		err := s.error(fmt.Errorf("malformed string literal"))
-
 		s.col += cur
 		s.buf = s.buf[cur:]
 
-		return nil, err
+		t.Typ = ERR
+		t.Tok.Lit = string(s.buf[:cur])
+		t.Tok.Hint().Text = "malformed string literal"
+		t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
+
+		return nil, &typ.Error{
+			Span: t.Tok,
+			Full: fmt.Sprintf("scanner: malfomed string literal at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
+			Help: "consider finishing the string with a closing quote",
+		}
+
 	}
 
-	t.Typ = STR
-	t.Tok.Lit = string(s.buf[:cur])
+	t.Typ = ISTR
+	t.Tok.Lit = string(s.buf[:cur+1])
 	s.prv = t
 	s.col += cur + 1
 	s.buf = s.buf[cur+1:]

@@ -4,6 +4,7 @@ type Type byte
 
 const (
 	EOF Type = iota
+	ERR
 
 	// Literals
 
@@ -55,9 +56,7 @@ const (
 	GE  // >=
 	EEQ // ==
 	NE  // !=
-
 	EQ  // =
-	INI // :=
 
 	// Logical operators
 
@@ -84,7 +83,15 @@ const (
 	BREAK
 	TRUE
 	FALSE
+
+	// Other
+
+	DOG
 )
+
+func (t Type) String() string {
+	return str[t]
+}
 
 func AsKeyword(lit string) (Type, bool) {
 	tt, ok := kwd[lit]
@@ -110,4 +117,71 @@ var kwd = map[string]Type{
 	"break":  BREAK,
 	"true":   TRUE,
 	"false":  FALSE,
+}
+
+var str = map[Type]string{
+	IDEN: "identifier",
+	II64: "signed numeric literal",
+	IU64: "unsigned numeric literal",
+	IF64: "floating-point literal",
+	ISTR: "string literal",
+
+	LP:  "(",
+	RP:  ")",
+	LB:  "{",
+	RB:  "}",
+	LSB: "[",
+	RSB: "]",
+	COL: ":",
+	SEM: ";",
+	COM: ",",
+	DOT: ".",
+
+	ADD:  "+",
+	SUB:  "-",
+	MUL:  "*",
+	DIV:  "/",
+	POW:  "**",
+	SHL:  "<<",
+	SHR:  ">>",
+	MOD:  "%",
+	BAND: "&",
+	BOR:  "|",
+	BXOR: "^",
+
+	BNEG: "~",
+	UNEG: "-",
+	LNEG: "!",
+
+	LT:  "<",
+	LE:  "<=",
+	GT:  ">",
+	GE:  ">=",
+	EEQ: "==",
+	NE:  "!=",
+	EQ:  "=",
+
+	LAND: "&&",
+	LOR:  "||",
+
+	USE:   "use",
+	VAR:   "var",
+	LET:   "let",
+	I64:   "i64",
+	U64:   "u64",
+	F64:   "f64",
+	STR:   "str",
+	BOOL:  "bool",
+	TYPE:  "type",
+	ENUM:  "enum",
+	FUNC:  "func",
+	FOR:   "for",
+	IF:    "if",
+	ELSE:  "else",
+	RET:   "ret",
+	BREAK: "break",
+	TRUE:  "true",
+	FALSE: "false",
+
+	DOG: "@",
 }

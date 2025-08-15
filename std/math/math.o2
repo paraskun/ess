@@ -1,34 +1,15 @@
 type event {
-  dev u64
-  val f64
+    dev u64
+    val f64
 }
 
 enum state {
-  Running
-  Waiting
+    Running
+    Waiting
 }
 
 var a = 10;
 
-func add(a f64, b f64) (f64) {
-  if a < 10 {
-    return b;
-  }
-
-  for a < 10 {
-    a = a + 1;
-  }
-
-  let e = event {
-    dev: 0u,
-    val: 0.0
-  } + 1 + event{
-    dev: 0u
-  } + event{
-    
-  };
-  
-  return a + b;
+func f(a f64, b f64) {
+    return a +;
 }
-
-func sub(a f64, b f64) (f64)

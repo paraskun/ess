@@ -126,6 +126,7 @@ func (m *Module) index(fsys fs.FS, name string, path string) error {
 	}
 
 	pkg := &Package{
+		Mod: m,
 		Src: make([]*File, 0),
 		Nat: make([]*File, 0),
 	}

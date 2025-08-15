@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/fatih/color"
 	"github.com/paraskun/o2/lex"
 	"github.com/paraskun/o2/tty"
 	"github.com/paraskun/o2/typ"
@@ -246,79 +247,106 @@ type File struct {
 	Dec []Decl
 }
 
-type options struct{}
+type options struct {
+	fmt bool
+}
 
 type Option func(*options)
 
-type parser struct {
-	lex lex.Scanner
+func Format() Option {
+	return func(o *options) {
+		o.fmt = true
+	}
+}
 
+type parser struct {
+	ops *options
+
+	lex lex.Scanner
 	buf bool
 	prv *lex.Lexeme
 	cur *lex.Lexeme
+	err *typ.Error
 
-	ops *options
 	pkg *mod.Package
 	src *mod.File
+
+	box tty.Span
 }
 
-func (p *parser) scan() *lex.Lexeme {
-	var err error
-	var lex *lex.Lexeme
-
-	for {
-		lex, err = p.lex.Next()
-
-		if err == nil {
-			break
-		}
-
-		fmt.Println(err)
+func (p *parser) peek(g tty.Group, r, b int) (*lex.Lexeme, *typ.Error) {
+	if !p.buf {
+		p.buf = true
+		p.prv = p.cur
+		p.cur, p.err = p.lex.Next()
 	}
 
-	// fmt.Println(lex.Typ, lex.Tok.Lit)
+	if g != nil && p.err != nil {
+		g.Add(p.cur.Tok, r, b)
+		p.err.Span = g
+	}
 
-	return lex
+	return p.cur, p.err
 }
 
-func (p *parser) next() *lex.Lexeme {
+func (p *parser) next(g tty.Group, r, b int) (*lex.Lexeme, *typ.Error) {
 	if !p.buf {
 		p.prv = p.cur
-		p.cur = p.scan()
+		p.cur, p.err = p.lex.Next()
 	}
 
 	p.buf = false
 
-	return p.cur
+	if g != nil {
+		g.Add(p.cur.Tok, r, b)
+
+		if p.err != nil {
+			p.err.Span = g
+		}
+	}
+
+	return p.cur, p.err
 }
 
-func (p *parser) peek() *lex.Lexeme {
+func (p *parser) must(t lex.Type, g tty.Group, r, b int) (*lex.Lexeme, *typ.Error) {
 	if !p.buf {
-		p.buf = true
 		p.prv = p.cur
-		p.cur = p.scan()
+		p.cur, p.err = p.lex.Next()
 	}
 
-	return p.cur
+	p.buf = false
+
+	if p.err == nil && p.cur.Typ != t {
+		p.cur.Tok.Hint().Text = fmt.Sprintf("%s expected here", t)
+		p.cur.Tok.Hint().Attr.Color.Add(color.FgRed)
+
+		p.err = &typ.Error{
+			Span: p.cur.Tok,
+			Full: fmt.Sprintf("%s expected, but %s were given", t, p.cur.Typ),
+			Help: "consider following language structure rules",
+		}
+	}
+
+	if g != nil {
+		g.Add(p.cur.Tok, r, b)
+
+		if p.err != nil {
+			p.err.Span = g
+		}
+	}
+
+	return p.cur, p.err
 }
 
-func (p *parser) must(t lex.Type) *lex.Lexeme {
-	if p.peek().Typ != t {
-		// TODO: process error
-
-		panic(fmt.Errorf("unexpected token at %d:%d", p.cur.Tok.Pos.Row, p.cur.Tok.Pos.Col))
-	}
-
-	return p.next()
-}
-
-func (p *parser) note(n Node) {
-	f := tty.Frame{
-		Name: p.pkg.Path + "/" + p.src.Name,
-		Span: n.Span(),
-	}
-
-	tty.Print(&f)
+func (p *parser) note(err *typ.Error) {
+	fmt.Printf("o2: %v\n\n", err.Full)
+	tty.Print(os.Stdout, &tty.Frame{
+		Name: p.src.Name,
+		Span: &tty.Box{
+			Sub: []tty.Span{err.Span},
+		},
+	})
+	fmt.Printf("\nhint: %s\n", err.Help)
 }
 
 func Parse(pkg *mod.Package, opts ...Option) {
@@ -338,7 +366,8 @@ func parse(pkg *mod.Package, ops *options) {
 		f, err := os.Open(src.Path)
 
 		if err != nil {
-			panic(err)
+			fmt.Printf("o2: %v\n", err)
+			return
 		} else {
 			defer f.Close()
 		}
@@ -346,19 +375,39 @@ func parse(pkg *mod.Package, ops *options) {
 		buf, err := io.ReadAll(f)
 
 		if err != nil {
-			panic(err)
+			fmt.Printf("o2: %v\n", err)
+			return
 		}
 
 		dec := &File{
-			Box: &tty.Box{},
 			Dec: make([]Decl, 0),
+			Box: &tty.Box{
+				Ctl: true,
+			},
 		}
 
 		p.src = src
 		p.lex.Load([]rune(string(buf)))
 
-		for p.peek().Typ != lex.EOF {
-			sub := p.parseDecl()
+		for {
+			tok, err := p.peek(nil, 0, 0)
+
+			if err != nil {
+				p.note(err)
+				return
+			}
+
+			if tok.Typ == lex.EOF {
+				break
+			}
+
+			sub, err := p.parseDecl()
+
+			if err != nil {
+				p.note(err)
+				return
+			}
+
 			ind := 1
 
 			if len(dec.Dec) == 0 {
@@ -371,21 +420,54 @@ func parse(pkg *mod.Package, ops *options) {
 
 		src.Dec = dec
 
-		tty.Print(&tty.Frame{
-			Name: p.src.Name,
-			Span: dec.Box,
-		})
+		if p.ops.fmt {
+			f.Close()
+
+			if err := os.Truncate(src.Path, 0); err != nil {
+				fmt.Printf("o2: format: %v\n", err)
+				break
+			}
+
+			out, err := os.OpenFile(src.Path, os.O_WRONLY, 0644)
+
+			if err != nil {
+				fmt.Printf("o2: format: %v\n", err)
+				break
+			} else {
+				defer out.Close()
+			}
+
+			tty.Print(out, dec.Box)
+		}
 	}
 }
 
-func (p *parser) parseDecl() Decl {
-	switch p.peek().Typ {
+func (p *parser) parseDecl() (Decl, *typ.Error) {
+	tok, err := p.peek(nil, 0, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	switch tok.Typ {
 	case lex.USE:
-		use := p.parseUseDecl()
+		use, err := p.parseUseDecl()
+
+		if err != nil {
+			return nil, err
+		}
+
 		pkg := p.pkg.Mod.Lookup(use.Pkg.Lit)
 
 		if pkg == nil {
-			panic("unknown package")
+			use.Pkg.Hint().Text = "could not find this package"
+			use.Pkg.Hint().Attr.Color.Add(color.FgRed)
+
+			return nil, &typ.Error{
+				Span: use.Box,
+				Full: "package not found",
+				Help: "verify package name and module dependencies",
+			}
 		}
 
 		use.Obj = &typ.Object{
@@ -397,9 +479,15 @@ func (p *parser) parseDecl() Decl {
 
 		parse(pkg, p.ops)
 
-		return use
+		return use, nil
 	case lex.VAR:
-		return &VarDecl{VarStmt: p.parseVarStmt()}
+		dec, err := p.parseVarStmt()
+
+		if err != nil {
+			return nil, err
+		}
+
+		return &VarDecl{VarStmt: dec}, nil
 	case lex.FUNC:
 		return p.parseFuncDecl()
 	case lex.TYPE:
@@ -407,166 +495,348 @@ func (p *parser) parseDecl() Decl {
 	case lex.ENUM:
 		return p.parseEnumDecl()
 	default:
-		panic("declaration expected")
+		tok.Tok.Hint().Text = "declaration expected here"
+		tok.Tok.Hint().Attr.Color.Add(color.FgRed)
+
+		return nil, &typ.Error{
+			Span: tok.Tok,
+			Full: "unexpected control sequence",
+			Help: "consider introducing additional logical scope",
+		}
 	}
 }
 
-func (p *parser) parseUseDecl() *UseDecl {
+func (p *parser) parseUseDecl() (*UseDecl, *typ.Error) {
 	dec := &UseDecl{Box: &tty.Row{}}
 
-	dec.Box.Add(p.must(lex.USE).Tok, 0, 0)
-	dec.Pkg = p.must(lex.ISTR).Tok
-	dec.Box.Add(dec.Pkg, 1, 0)
+	if _, err := p.must(lex.USE, dec.Box, 0, 0); err != nil {
+		return nil, err
+	}
 
-	return dec
+	if tok, err := p.must(lex.ISTR, dec.Box, 1, 0); err != nil {
+		return nil, err
+	} else {
+		dec.Pkg = tok.Tok
+	}
+
+	return dec, nil
 }
 
-func (p *parser) parseFuncDecl() *FuncDecl {
+func (p *parser) parseFuncDecl() (*FuncDecl, *typ.Error) {
 	dec := &FuncDecl{Sig: &tty.Row{}}
 	top := &tty.Row{}
-	top.Add(p.must(lex.FUNC).Tok, 0, 0)
 
-	dec.Sym = p.must(lex.IDEN).Tok
-	dec.Sig.Add(dec.Sym, 0, 0)
-	dec.Sig.Add(p.must(lex.LP).Tok, 0, 0)
+	if _, err := p.must(lex.FUNC, top, 0, 0); err != nil {
+		return nil, err
+	}
 
-	for p.peek().Typ != lex.RP {
+	if tok, err := p.must(lex.IDEN, dec.Sig, 0, 0); err != nil {
+		return nil, err
+	} else {
+		dec.Sym = tok.Tok
+	}
+
+	if _, err := p.must(lex.LP, dec.Sig, 0, 0); err != nil {
+		return nil, err
+	}
+
+	for {
+		tok, err := p.peek(dec.Sig, 0, 0)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if tok.Typ == lex.RP {
+			break
+		}
+
 		ind := 0
 
 		if len(dec.Arg) != 0 {
 			ind = 1
 		}
 
-		arg := p.parseNamedField()
+		arg, err := p.parseNamedField(dec.Sig, ind, 0)
+
+		if err != nil {
+			return nil, err
+		}
 
 		dec.Arg = append(dec.Arg, arg)
-		dec.Sig.Add(arg.Box, ind, 0)
+		tok, err = p.peek(dec.Sig, 0, 0)
 
-		if p.peek().Typ != lex.RP {
-			dec.Sig.Add(p.must(lex.COM).Tok, 0, 0)
+		if err != nil {
+			return nil, err
+		}
+
+		if tok.Typ != lex.RP {
+			if _, err = p.must(lex.COM, dec.Sig, 0, 0); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	dec.Sig.Add(p.must(lex.RP).Tok, 0, 0)
+	if _, err := p.must(lex.RP, dec.Sig, 0, 0); err != nil {
+		return nil, err
+	}
 
-	if p.peek().Typ == lex.LP {
-		dec.Sig.Add(p.next().Tok, 1, 0)
+	tok, err := p.peek(dec.Sig, 1, 0)
 
-		dec.Ret = p.parseTypeSpec()
+	if err != nil {
+		return nil, err
+	}
 
-		dec.Sig.Add(dec.Ret.Tok, 0, 0)
-		dec.Sig.Add(p.must(lex.RP).Tok, 0, 0)
+	if tok.Typ == lex.LP {
+		p.next(dec.Sig, 1, 0)
+
+		if _, err := p.parseTypeSpec(dec.Sig, 0, 0); err != nil {
+			return nil, err
+		}
+
+		if _, err := p.must(lex.RP, dec.Sig, 0, 0); err != nil {
+			return nil, err
+		}
 	}
 
 	top.Add(dec.Sig, 1, 0)
+	tok, err = p.peek(top, 1, 0)
 
-	if p.peek().Typ == lex.LB {
+	if err != nil {
+		return nil, err
+	}
+
+	if tok.Typ == lex.LB {
+		if _, err := p.next(top, 1, 0); err != nil {
+			return nil, err
+		}
+
 		dec.Box = &tty.Box{}
 
-		top.Add(p.next().Tok, 1, 0)
-
-		dec.Sub = p.parseBlockStmt()
-
 		dec.Box.Add(top, 0, 0)
+		dec.Sub, err = p.parseBlockStmt()
+
+		if err != nil {
+			return nil, err
+		}
+
 		dec.Box.Add(dec.Sub.Box, 4, 0)
-		dec.Box.Add(p.must(lex.RB).Tok, 0, 0)
+
+		if _, err := p.must(lex.RB, dec.Box, 0, 0); err != nil {
+			return nil, err
+		}
 	} else {
 		dec.Box = &tty.Row{}
 		dec.Box.Add(top, 0, 0)
 	}
 
-	return dec
+	return dec, nil
 }
 
-func (p *parser) parseStructDecl() *StructDecl {
+func (p *parser) parseStructDecl() (*StructDecl, *typ.Error) {
 	dec := &StructDecl{}
 	top := &tty.Row{}
 
-	top.Add(p.must(lex.TYPE).Tok, 0, 0)
-	dec.Sym = p.must(lex.IDEN).Tok
-	top.Add(dec.Sym, 1, 0)
-	top.Add(p.must(lex.LB).Tok, 1, 0)
+	if _, err := p.must(lex.TYPE, top, 0, 0); err != nil {
+		return nil, err
+	}
 
-	if p.peek().Typ != lex.RB {
+	tok, err := p.must(lex.IDEN, top, 1, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	dec.Sym = tok.Tok
+
+	if _, err := p.must(lex.LB, top, 1, 0); err != nil {
+		return nil, err
+	}
+
+	tok, err = p.peek(top, 1, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if tok.Typ != lex.RB {
 		dec.Box = &tty.Box{}
 		dec.Box.Add(top, 0, 0)
 
-		for p.peek().Typ != lex.RB {
-			mem := p.parseNamedField()
+		for {
+			tok, err := p.peek(dec.Box, 4, 0)
+
+			if err != nil {
+				return nil, err
+			}
+
+			if tok.Typ == lex.RB {
+				break
+			}
+
+			mem, err := p.parseNamedField(dec.Box, 4, 0)
+
+			if err != nil {
+				return nil, err
+			}
 
 			dec.Mem = append(dec.Mem, mem)
-			dec.Box.Add(mem.Box, 4, 0)
 		}
 	} else {
 		dec.Box = &tty.Row{}
 		dec.Box.Add(top, 0, 0)
 	}
 
-	dec.Box.Add(p.must(lex.RB).Tok, 0, 0)
+	if _, err := p.must(lex.RB, dec.Box, 0, 0); err != nil {
+		return nil, err
+	}
 
-	return dec
+	return dec, nil
 }
 
-func (p *parser) parseEnumDecl() *EnumDecl {
+func (p *parser) parseEnumDecl() (*EnumDecl, *typ.Error) {
 	dec := &EnumDecl{}
 	top := &tty.Row{}
 
-	top.Add(p.must(lex.ENUM).Tok, 0, 0)
-	dec.Sym = p.must(lex.IDEN).Tok
-	top.Add(dec.Sym, 1, 0)
-	top.Add(p.must(lex.LB).Tok, 1, 0)
+	if _, err := p.must(lex.ENUM, top, 0, 0); err != nil {
+		return nil, err
+	}
 
-	if p.peek().Typ != lex.RB {
+	tok, err := p.must(lex.IDEN, top, 1, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	dec.Sym = tok.Tok
+
+	if _, err := p.must(lex.LB, top, 1, 0); err != nil {
+		return nil, err
+	}
+
+	tok, err = p.peek(top, 1, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if tok.Typ != lex.RB {
 		dec.Box = &tty.Box{}
 		dec.Box.Add(top, 0, 0)
 
-		for p.peek().Typ != lex.RB {
-			mem := p.must(lex.IDEN).Tok
+		for {
+			tok, err := p.peek(dec.Box, 4, 0)
 
-			dec.Mem = append(dec.Mem, mem)
-			dec.Box.Add(mem, 4, 0)
+			if err != nil {
+				return nil, err
+			}
+
+			if tok.Typ == lex.RB {
+				break
+			}
+
+			mem, err := p.must(lex.IDEN, dec.Box, 4, 0)
+
+			if err != nil {
+				return nil, err
+			}
+
+			dec.Mem = append(dec.Mem, mem.Tok)
 		}
 	} else {
 		dec.Box = &tty.Row{}
 		dec.Box.Add(top, 0, 0)
 	}
 
-	dec.Box.Add(p.must(lex.RB).Tok, 0, 0)
-
-	return dec
-}
-
-func (p *parser) parseNamedField() *NamedField {
-	res := &NamedField{
-		Box: &tty.Row{},
-		Sym: p.must(lex.IDEN).Tok,
-		Typ: p.parseTypeSpec(),
+	if _, err := p.must(lex.RB, dec.Box, 0, 0); err != nil {
+		return nil, err
 	}
 
-	res.Box.Add(res.Sym, 0, 0)
-	res.Box.Add(res.Typ.Tok, 1, 0)
-
-	return res
+	return dec, nil
 }
 
-func (p *parser) parseTypeSpec() *TypeSpec {
-	switch p.peek().Typ {
+func (p *parser) parseNamedField(g tty.Group, r, b int) (*NamedField, *typ.Error) {
+	res := &NamedField{Box: &tty.Row{}}
+
+	if g != nil {
+		g.Add(res.Box, r, b)
+	}
+
+	tok, err := p.must(lex.IDEN, res.Box, 0, 0)
+
+	if err != nil {
+		if g != nil {
+			err.Span = g
+		}
+
+		return nil, err
+	}
+
+	res.Sym = tok.Tok
+	tsp, err := p.parseTypeSpec(res.Box, 1, 0)
+
+	if err != nil {
+		if g != nil {
+			err.Span = g
+		}
+
+		return nil, err
+	}
+
+	res.Typ = tsp
+
+	return res, nil
+}
+
+func (p *parser) parseTypeSpec(g tty.Group, r, b int) (*TypeSpec, *typ.Error) {
+	tok, err := p.next(g, r, b)
+
+	if err != nil {
+		return nil, err
+	}
+
+	switch tok.Typ {
 	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDEN:
-		return &TypeSpec{Tok: p.next().Tok}
+		return &TypeSpec{Tok: tok.Tok}, nil
 	}
 
-	// TODO: error handling
-	panic("type specification expected")
+	tok.Tok.Hint().Text = "type specification expected here"
+	tok.Tok.Hint().Attr.Color.Add(color.FgRed)
+
+	return nil, &typ.Error{
+		Span: g,
+		Full: "unexpected control sequence",
+		Help: "consider specifying existing type",
+	}
 }
 
-func (p *parser) parseBlockStmt() *BlockStmt {
+func (p *parser) parseBlockStmt() (*BlockStmt, *typ.Error) {
 	res := &BlockStmt{}
+	tok, err := p.peek(nil, 0, 0)
 
-	if p.peek().Typ != lex.RB {
+	if err != nil {
+		return nil, err
+	}
+
+	if tok.Typ != lex.RB {
 		res.Box = &tty.Box{}
 
-		for p.peek().Typ != lex.RB {
-			sub := p.parseStmt()
+		for {
+			tok, err := p.peek(res.Box, 0, 0)
+
+			if err != nil {
+				return nil, err
+			}
+
+			if tok.Typ == lex.RB {
+				break
+			}
+
+			sub, err := p.parseStmt()
+
+			if err != nil {
+				return nil, err
+			}
 
 			res.Sub = append(res.Sub, sub)
 			res.Box.Add(sub.Span(), 0, 0)
@@ -575,25 +845,59 @@ func (p *parser) parseBlockStmt() *BlockStmt {
 		res.Box = &tty.Row{}
 	}
 
-	return res
+	return res, nil
 }
 
-func (p *parser) parseStmt() Stmt {
-	switch p.peek().Typ {
+func (p *parser) parseStmt() (Stmt, *typ.Error) {
+	tok, err := p.peek(nil, 0, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	switch tok.Typ {
 	case lex.IDEN:
-		iden := p.next()
+		grp := &tty.Row{}
+		iden, err := p.next(grp, 0, 0)
 
-		if p.peek().Typ == lex.LP {
-			res := p.parseCall(iden.Tok)
-			res.Box.InsertEnd(p.must(lex.SEM).Tok, 0)
+		if err != nil {
+			return nil, err
+		}
 
-			return &CallStmt{res}
+		tok, err = p.peek(grp, 1, 0)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if tok.Typ == lex.LP {
+			res, err := p.parseCall(iden.Tok)
+
+			if err != nil {
+				return nil, err
+			}
+
+			tok, err := p.must(lex.SEM, res.Box, 0, 0)
+
+			if err != nil {
+				return nil, err
+			}
+
+			res.Box.InsertEnd(tok.Tok, 0)
+
+			return &CallStmt{res}, nil
 		}
 
 		var cur Expr = &IdenExpr{Tok: iden.Tok}
 
 		for {
-			switch p.peek().Typ {
+			tok, err := p.peek(grp, 1, 0)
+
+			if err != nil {
+				return nil, err
+			}
+
+			switch tok.Typ {
 			case lex.DOT:
 				dot := &DotExpr{
 					Box: &tty.Row{},
@@ -601,10 +905,18 @@ func (p *parser) parseStmt() Stmt {
 				}
 
 				dot.Box.Add(dot.Ctx.Span(), 0, 0)
-				dot.Box.Add(p.next().Tok, 0, 0)
-				dot.Mem = p.must(lex.IDEN).Tok
-				dot.Box.Add(dot.Mem, 0, 0)
 
+				if _, err := p.next(dot.Box, 0, 0); err != nil {
+					return nil, err
+				}
+
+				tok, err := p.must(lex.IDEN, dot.Box, 0, 0)
+
+				if err != nil {
+					return nil, err
+				}
+
+				dot.Mem = tok.Tok
 				cur = dot
 
 				continue
@@ -617,24 +929,42 @@ func (p *parser) parseStmt() Stmt {
 		top := &tty.Row{}
 
 		top.Add(cur.Span(), 0, 0)
-		top.Add(p.must(lex.EQ).Tok, 1, 0)
 
-		res.Val = p.parseExpr0()
+		if _, err := p.must(lex.EQ, top, 1, 0); err != nil {
+			return nil, err
+		}
+
+		res.Val, err = p.parseExpr0()
+
+		if err != nil {
+			return nil, err
+		}
 
 		switch b := res.Val.Span().(type) {
 		case *tty.Box:
 			res.Box = &tty.Box{}
-			b.InsertEnd(p.must(lex.SEM).Tok, 0)
+
+			tok, err := p.must(lex.SEM, nil, 0, 0)
+			b.InsertEnd(tok.Tok, 0)
+
+			if err != nil {
+				err.Span = b
+				return nil, err
+			}
+
 			res.Box.Add(top, 0, 0)
 			res.Box.Add(b, 4, 0)
 		case tty.Mono:
 			res.Box = &tty.Row{}
 			res.Box.Add(top, 0, 0)
 			res.Box.Add(b, 1, 0)
-			res.Box.Add(p.must(lex.SEM).Tok, 0, 0)
+
+			if _, err := p.must(lex.SEM, res.Box, 0, 0); err != nil {
+				return nil, err
+			}
 		}
 
-		return res
+		return res, nil
 	case lex.VAR:
 		return p.parseVarStmt()
 	case lex.LET:
@@ -647,21 +977,45 @@ func (p *parser) parseStmt() Stmt {
 		return p.parseReturnStmt()
 	}
 
-	panic("statement expected")
+	tok.Tok.Hint().Text = "statement expected"
+	tok.Tok.Hint().Attr.Color.Add(color.FgRed)
+
+	return nil, &typ.Error{
+		Span: tok.Tok,
+		Full: "unexpected control sequence",
+		Help: "consider introducing new statement",
+	}
 }
 
-func (p *parser) parseCall(sym *tty.Tok) *CallExpr {
+func (p *parser) parseCall(sym *tty.Tok) (*CallExpr, *typ.Error) {
 	res := &CallExpr{}
 	top := &tty.Row{}
 
 	top.Add(sym, 0, 0)
-	top.Add(p.next().Tok, 0, 0)
+
+	if _, err := p.next(top, 0, 0); err != nil {
+		return nil, err
+	}
 
 	box := &tty.Box{}
 	row := top
 
-	for p.peek().Typ != lex.RP {
-		arg := p.parseExpr0()
+	for {
+		tok, err := p.peek(top, 1, 0)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if tok.Typ == lex.RP {
+			break
+		}
+
+		arg, err := p.parseExpr0()
+
+		if err != nil {
+			return nil, err
+		}
 
 		switch b := arg.Span().(type) {
 		case *tty.Box:
@@ -670,12 +1024,33 @@ func (p *parser) parseCall(sym *tty.Tok) *CallExpr {
 			}
 
 			box.Add(b, 4, 0)
+			tok, err := p.peek(nil, 0, 0)
 
-			if p.peek().Typ != lex.RP {
-				box.InsertEnd(p.must(lex.COM).Tok, 0)
+			if err != nil {
+				box.InsertEnd(tok.Tok, 0)
+				err.Span = box
+
+				return nil, err
+			}
+
+			if tok.Typ != lex.RP {
+				tok, err := p.must(lex.COM, nil, 0, 0)
+				box.InsertEnd(tok.Tok, 0)
+
+				if err != nil {
+					err.Span = box
+					return nil, err
+				}
+
 				row = &tty.Row{}
 			} else {
-				box.InsertEnd(p.must(lex.RP).Tok, 0)
+				tok, err := p.must(lex.RP, nil, 0, 0)
+				box.InsertEnd(tok.Tok, 0)
+
+				if err != nil {
+					err.Span = box
+					return nil, err
+				}
 			}
 		case tty.Mono:
 			if len(row.Sub) != 0 {
@@ -684,10 +1059,20 @@ func (p *parser) parseCall(sym *tty.Tok) *CallExpr {
 				row.Add(b, 0, 0)
 			}
 
-			if p.peek().Typ != lex.RP {
-				row.Add(p.must(lex.COM).Tok, 0, 0)
+			tok, err := p.peek(row, 1, 0)
+
+			if err != nil {
+				return nil, err
+			}
+
+			if tok.Typ != lex.RP {
+				if _, err := p.must(lex.COM, row, 0, 0); err != nil {
+					return nil, err
+				}
 			} else {
-				row.Add(p.must(lex.RP).Tok, 0, 0)
+				if _, err := p.must(lex.RP, row, 0, 0); err != nil {
+					return nil, err
+				}
 			}
 		}
 
@@ -700,18 +1085,33 @@ func (p *parser) parseCall(sym *tty.Tok) *CallExpr {
 		res.Box = row
 	}
 
-	return res
+	return res, nil
 }
 
-func (p *parser) parseVarStmt() *VarStmt {
+func (p *parser) parseVarStmt() (*VarStmt, *typ.Error) {
 	top := &tty.Row{}
-	top.Add(p.must(lex.VAR).Tok, 0, 0)
 
-	res := &VarStmt{Var: p.must(lex.IDEN).Tok}
-	top.Add(res.Var, 1, 0)
-	top.Add(p.must(lex.EQ).Tok, 1, 0)
+	if _, err := p.must(lex.VAR, top, 0, 0); err != nil {
+		return nil, err
+	}
 
-	res.Ini = p.parseExpr0()
+	tok, err := p.must(lex.IDEN, top, 1, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	res := &VarStmt{Var: tok.Tok}
+
+	if _, err := p.must(lex.EQ, top, 1, 0); err != nil {
+		return nil, err
+	}
+
+	res.Ini, err = p.parseExpr0()
+
+	if err != nil {
+		return nil, err
+	}
 
 	switch b := res.Ini.Span().(type) {
 	case *tty.Box:
@@ -724,20 +1124,41 @@ func (p *parser) parseVarStmt() *VarStmt {
 		res.Box.Add(b, 1, 0)
 	}
 
-	res.Box.InsertEnd(p.must(lex.SEM).Tok, 0)
+	tok, err = p.must(lex.SEM, nil, 0, 0)
+	res.Box.InsertEnd(tok.Tok, 0)
 
-	return res
+	if err != nil {
+		err.Span = res.Box
+		return nil, err
+	}
+
+	return res, nil
 }
 
-func (p *parser) parseLetStmt() *LetStmt {
+func (p *parser) parseLetStmt() (*LetStmt, *typ.Error) {
 	top := &tty.Row{}
-	top.Add(p.must(lex.LET).Tok, 0, 0)
 
-	res := &LetStmt{Var: p.must(lex.IDEN).Tok}
-	top.Add(res.Var, 1, 0)
-	top.Add(p.must(lex.EQ).Tok, 1, 0)
+	if _, err := p.must(lex.LET, top, 0, 0); err != nil {
+		return nil, err
+	}
 
-	res.Ini = p.parseExpr0()
+	tok, err := p.must(lex.IDEN, top, 1, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	res := &LetStmt{Var: tok.Tok}
+
+	if _, err := p.must(lex.EQ, top, 1, 0); err != nil {
+		return nil, err
+	}
+
+	res.Ini, err = p.parseExpr0()
+
+	if err != nil {
+		return nil, err
+	}
 
 	switch b := res.Ini.Span().(type) {
 	case *tty.Box:
@@ -750,16 +1171,29 @@ func (p *parser) parseLetStmt() *LetStmt {
 		res.Box.Add(b, 1, 0)
 	}
 
-	res.Box.InsertEnd(p.must(lex.SEM).Tok, 0)
+	tok, err = p.must(lex.SEM, nil, 0, 0)
+	res.Box.InsertEnd(tok.Tok, 0)
 
-	return res
+	if err != nil {
+		err.Span = res.Box
+		return nil, err
+	}
+
+	return res, nil
 }
 
-func (p *parser) parseLoopStmt() *LoopStmt {
-	tok := p.must(lex.FOR).Tok
-	res := &LoopStmt{
-		Box: &tty.Box{},
-		Con: p.parseExpr0(),
+func (p *parser) parseLoopStmt() (*LoopStmt, *typ.Error) {
+	res := &LoopStmt{Box: &tty.Box{}}
+	tok, err := p.must(lex.FOR, nil, 0, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	res.Con, err = p.parseExpr0()
+
+	if err != nil {
+		return nil, err
 	}
 
 	var log tty.Group
@@ -767,30 +1201,51 @@ func (p *parser) parseLoopStmt() *LoopStmt {
 	switch res.Con.Span().(type) {
 	case *tty.Box:
 		log = &tty.Box{}
-		log.Add(tok, 0, 0)
+		log.Add(tok.Tok, 0, 0)
 		log.Add(res.Con.Span(), 4, 0)
-		log.Add(p.must(lex.LB).Tok, 0, 0)
+
+		if _, err := p.must(lex.LB, log, 0, 0); err != nil {
+			return nil, err
+		}
 	case tty.Mono:
 		log = &tty.Row{}
-		log.Add(tok, 0, 0)
+		log.Add(tok.Tok, 0, 0)
 		log.Add(res.Con.Span(), 1, 0)
-		log.Add(p.must(lex.LB).Tok, 1, 0)
+
+		if _, err := p.must(lex.LB, log, 1, 0); err != nil {
+			return nil, err
+		}
 	}
 
 	res.Box.Add(log, 0, 0)
-	res.Sub = p.parseBlockStmt()
-	res.Box.Add(res.Sub.Box, 4, 0)
-	res.Box.Add(p.must(lex.RB).Tok, 0, 0)
 
-	return res
+	res.Sub, err = p.parseBlockStmt()
+	res.Box.Add(res.Sub.Box, 4, 0)
+
+	if err != nil {
+		err.Span = res.Box
+		return nil, err
+	}
+
+	if _, err := p.must(lex.RB, res.Box, 0, 0); err != nil {
+		return nil, err
+	}
+
+	return res, nil
 }
 
-func (p *parser) parseCondStmt() *CondStmt {
-	tok := p.must(lex.IF).Tok
-	box := &tty.Box{}
-	res := &CondStmt{
-		Box: box,
-		Con: p.parseExpr0(),
+func (p *parser) parseCondStmt() (*CondStmt, *typ.Error) {
+	res := &CondStmt{Box: &tty.Box{}}
+	tok, err := p.must(lex.IF, nil, 0, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	res.Con, err = p.parseExpr0()
+
+	if err != nil {
+		return nil, err
 	}
 
 	var log tty.Group
@@ -798,42 +1253,94 @@ func (p *parser) parseCondStmt() *CondStmt {
 	switch res.Con.Span().(type) {
 	case *tty.Box:
 		log = &tty.Box{}
-		log.Add(tok, 0, 0)
+		log.Add(tok.Tok, 0, 0)
 		log.Add(res.Con.Span(), 4, 0)
-		log.Add(p.must(lex.LB).Tok, 0, 0)
+
+		if _, err := p.must(lex.LB, log, 0, 0); err != nil {
+			return nil, err
+		}
 	case tty.Mono:
 		log = &tty.Row{}
-		log.Add(tok, 0, 0)
+		log.Add(tok.Tok, 0, 0)
 		log.Add(res.Con.Span(), 1, 0)
-		log.Add(p.must(lex.LB).Tok, 1, 0)
+
+		if _, err := p.must(lex.LB, log, 1, 0); err != nil {
+			return nil, err
+		}
 	}
 
-	box.Add(log, 0, 0)
-	res.Pos = p.parseBlockStmt()
-	box.Add(res.Pos.Box, 4, 0)
-	box.Add(p.must(lex.RB).Tok, 0, 0)
+	res.Box.Add(log, 0, 0)
+	res.Pos, err = p.parseBlockStmt()
 
-	if p.peek().Typ == lex.ELSE {
-		box.InsertEnd(p.next().Tok, 1)
-		box.InsertEnd(p.must(lex.LB).Tok, 1)
-		res.Neg = p.parseBlockStmt()
-		box.Add(res.Neg.Box, 4, 0)
-		box.Add(p.must(lex.RB).Tok, 0, 0)
+	if err != nil {
+		return nil, err
 	}
 
-	return res
+	res.Box.Add(res.Pos.Box, 4, 0)
+
+	if _, err := p.must(lex.RB, res.Box, 0, 0); err != nil {
+		return nil, err
+	}
+
+	tok, err = p.peek(nil, 0, 0)
+
+	if err != nil {
+		res.Box.InsertEnd(tok.Tok, 1)
+		err.Span = res.Box
+
+		return nil, err
+	}
+
+	if tok.Typ == lex.ELSE {
+		tok, _ = p.next(nil, 0, 0)
+		res.Box.InsertEnd(tok.Tok, 1)
+
+		tok, err = p.must(lex.LB, nil, 0, 0)
+		res.Box.InsertEnd(tok.Tok, 1)
+
+		if err != nil {
+			err.Span = res.Box
+			return nil, err
+		}
+
+		res.Neg, err = p.parseBlockStmt()
+		res.Box.Add(res.Neg.Box, 4, 0)
+
+		if err != nil {
+			err.Span = res.Box
+			return nil, err
+		}
+
+		if _, err := p.must(lex.RB, res.Box, 0, 0); err != nil {
+			return nil, err
+		}
+	}
+
+	return res, nil
 }
 
-func (p *parser) parseReturnStmt() *ReturnStmt {
+func (p *parser) parseReturnStmt() (*ReturnStmt, *typ.Error) {
 	res := &ReturnStmt{}
 	top := &tty.Row{}
 
-	top.Add(p.must(lex.RET).Tok, 0, 0)
+	if _, err := p.must(lex.RET, top, 0, 0); err != nil {
+		return nil, err
+	}
 
-	if p.peek().Typ == lex.SEM {
+	tok, err := p.peek(top, 1, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if tok.Typ == lex.SEM {
 		res.Box = top
 	} else {
-		res.Ret = p.parseExpr0()
+		res.Ret, err = p.parseExpr0()
+
+		if err != nil {
+			return nil, err
+		}
 
 		switch rb := res.Ret.Span().(type) {
 		case *tty.Box:
@@ -848,33 +1355,53 @@ func (p *parser) parseReturnStmt() *ReturnStmt {
 
 	}
 
-	res.Box.InsertEnd(p.must(lex.SEM).Tok, 0)
+	tok, err = p.must(lex.SEM, nil, 0, 0)
+	res.Box.InsertEnd(tok.Tok, 0)
 
-	return res
+	if err != nil {
+		err.Span = res.Box
+
+		return nil, err
+	}
+
+	return res, nil
 }
 
-func (p *parser) parseExpr0() Expr {
-	cur := p.parseExpr1()
+func (p *parser) parseExpr0() (Expr, *typ.Error) {
+	cur, err := p.parseExpr1()
+
+	if err != nil {
+		return nil, err
+	}
 
 	for {
-		switch p.peek().Typ {
+		tok, err := p.peek(nil, 0, 0)
+
+		if err != nil {
+			return nil, err
+		}
+
+		switch tok.Typ {
 		case lex.LAND, lex.LOR:
-			tok := p.next().Tok
-			res := &InfExpr{
-				X: cur,
-				Y: p.parseExpr1(),
+			tok, _ := p.next(nil, 0, 0)
+			res := &InfExpr{X: cur}
+
+			res.Y, err = p.parseExpr1()
+
+			if err != nil {
+				return nil, err
 			}
 
 			switch yb := res.Y.Span().(type) {
 			case *tty.Box:
-				yb.InsertBeg(tok, 1)
+				yb.InsertBeg(tok.Tok, 1)
 
 				res.Box = &tty.Box{}
 				res.Box.Add(cur.Span(), 0, 0)
 				res.Box.Add(yb, 4, 0)
 			case tty.Mono:
 				row := &tty.Row{}
-				row.Add(tok, 0, 0)
+				row.Add(tok.Tok, 0, 0)
 				row.Add(yb, 1, 0)
 
 				switch xb := cur.Span().(type) {
@@ -897,31 +1424,44 @@ func (p *parser) parseExpr0() Expr {
 		break
 	}
 
-	return cur
+	return cur, nil
 }
 
-func (p *parser) parseExpr1() Expr {
-	cur := p.parseExpr2()
+func (p *parser) parseExpr1() (Expr, *typ.Error) {
+	cur, err := p.parseExpr2()
+
+	if err != nil {
+		return nil, err
+	}
 
 	for {
-		switch p.peek().Typ {
+		tok, err := p.peek(nil, 0, 0)
+
+		if err != nil {
+			return nil, err
+		}
+
+		switch tok.Typ {
 		case lex.LT, lex.GT, lex.LE, lex.GE, lex.NE, lex.EEQ:
-			tok := p.next().Tok
-			res := &InfExpr{
-				X: cur,
-				Y: p.parseExpr2(),
+			tok, _ := p.next(nil, 0, 0)
+			res := &InfExpr{X: cur}
+
+			res.Y, err = p.parseExpr2()
+
+			if err != nil {
+				return nil, err
 			}
 
 			switch yb := res.Y.Span().(type) {
 			case *tty.Box:
-				yb.InsertBeg(tok, 1)
+				yb.InsertBeg(tok.Tok, 1)
 
 				res.Box = &tty.Box{}
 				res.Box.Add(cur.Span(), 0, 0)
 				res.Box.Add(yb, 4, 0)
 			case tty.Mono:
 				row := &tty.Row{}
-				row.Add(tok, 0, 0)
+				row.Add(tok.Tok, 0, 0)
 				row.Add(yb, 1, 0)
 
 				switch xb := cur.Span().(type) {
@@ -944,32 +1484,45 @@ func (p *parser) parseExpr1() Expr {
 		break
 	}
 
-	return cur
+	return cur, nil
 
 }
 
-func (p *parser) parseExpr2() Expr {
-	cur := p.parseExpr3()
+func (p *parser) parseExpr2() (Expr, *typ.Error) {
+	cur, err := p.parseExpr3()
+
+	if err != nil {
+		return nil, err
+	}
 
 	for {
-		switch p.peek().Typ {
+		tok, err := p.peek(nil, 0, 0)
+
+		if err != nil {
+			return nil, err
+		}
+
+		switch tok.Typ {
 		case lex.SHL, lex.SHR, lex.BAND, lex.BOR, lex.BXOR:
-			tok := p.next().Tok
-			res := &InfExpr{
-				X: cur,
-				Y: p.parseExpr3(),
+			tok, _ := p.next(nil, 0, 0)
+			res := &InfExpr{X: cur}
+
+			res.Y, err = p.parseExpr3()
+
+			if err != nil {
+				return nil, err
 			}
 
 			switch yb := res.Y.Span().(type) {
 			case *tty.Box:
-				yb.InsertBeg(tok, 1)
+				yb.InsertBeg(tok.Tok, 1)
 
 				res.Box = &tty.Box{}
 				res.Box.Add(cur.Span(), 0, 0)
 				res.Box.Add(yb, 4, 0)
 			case tty.Mono:
 				row := &tty.Row{}
-				row.Add(tok, 0, 0)
+				row.Add(tok.Tok, 0, 0)
 				row.Add(yb, 1, 0)
 
 				switch xb := cur.Span().(type) {
@@ -992,31 +1545,44 @@ func (p *parser) parseExpr2() Expr {
 		break
 	}
 
-	return cur
+	return cur, nil
 }
 
-func (p *parser) parseExpr3() Expr {
-	cur := p.parseExpr4()
+func (p *parser) parseExpr3() (Expr, *typ.Error) {
+	cur, err := p.parseExpr4()
+
+	if err != nil {
+		return nil, err
+	}
 
 	for {
-		switch p.peek().Typ {
+		tok, err := p.peek(nil, 0, 0)
+
+		if err != nil {
+			return nil, err
+		}
+
+		switch tok.Typ {
 		case lex.ADD, lex.SUB:
-			tok := p.next().Tok
-			res := &InfExpr{
-				X: cur,
-				Y: p.parseExpr4(),
+			tok, _ := p.next(nil, 0, 0)
+			res := &InfExpr{X: cur}
+
+			res.Y, err = p.parseExpr4()
+
+			if err != nil {
+				return nil, err
 			}
 
 			switch yb := res.Y.Span().(type) {
 			case *tty.Box:
-				yb.InsertBeg(tok, 1)
+				yb.InsertBeg(tok.Tok, 1)
 
 				res.Box = &tty.Box{}
 				res.Box.Add(cur.Span(), 0, 0)
 				res.Box.Add(yb, 4, 0)
 			case tty.Mono:
 				row := &tty.Row{}
-				row.Add(tok, 0, 0)
+				row.Add(tok.Tok, 0, 0)
 				row.Add(yb, 1, 0)
 
 				switch xb := cur.Span().(type) {
@@ -1039,31 +1605,44 @@ func (p *parser) parseExpr3() Expr {
 		break
 	}
 
-	return cur
+	return cur, nil
 }
 
-func (p *parser) parseExpr4() Expr {
-	cur := p.parseExpr5()
+func (p *parser) parseExpr4() (Expr, *typ.Error) {
+	cur, err := p.parseExpr5()
+
+	if err != nil {
+		return nil, err
+	}
 
 	for {
-		switch p.peek().Typ {
+		tok, err := p.peek(nil, 0, 0)
+
+		if err != nil {
+			return nil, err
+		}
+
+		switch tok.Typ {
 		case lex.MUL, lex.DIV, lex.MOD, lex.POW:
-			tok := p.next().Tok
-			res := &InfExpr{
-				X: cur,
-				Y: p.parseExpr5(),
+			tok, _ := p.next(nil, 0, 0)
+			res := &InfExpr{X: cur}
+
+			res.Y, err = p.parseExpr5()
+
+			if err != nil {
+				return nil, err
 			}
 
 			switch yb := res.Y.Span().(type) {
 			case *tty.Box:
-				yb.InsertBeg(tok, 1)
+				yb.InsertBeg(tok.Tok, 1)
 
 				res.Box = &tty.Box{}
 				res.Box.Add(cur.Span(), 0, 0)
 				res.Box.Add(yb, 4, 0)
 			case tty.Mono:
 				row := &tty.Row{}
-				row.Add(tok, 0, 0)
+				row.Add(tok.Tok, 0, 0)
 				row.Add(yb, 1, 0)
 
 				switch xb := cur.Span().(type) {
@@ -1086,47 +1665,74 @@ func (p *parser) parseExpr4() Expr {
 		break
 	}
 
-	return cur
+	return cur, nil
 }
 
-func (p *parser) parseExpr5() Expr {
-	switch p.peek().Typ {
+func (p *parser) parseExpr5() (Expr, *typ.Error) {
+	tok, err := p.peek(nil, 0, 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	switch tok.Typ {
 	case lex.LNEG, lex.BNEG, lex.UNEG:
-		tok := p.next().Tok
-		res := &PfxExpr{X: p.parseExpr5()}
+		tok, _ := p.next(nil, 0, 0)
+		res := &PfxExpr{}
+
+		res.X, err = p.parseExpr5()
+
+		if err != nil {
+			return nil, err
+		}
 
 		switch sb := res.X.Span().(type) {
 		case *tty.Box:
-			sb.InsertBeg(tok, 0)
+			sb.InsertBeg(tok.Tok, 0)
 			res.Box = sb
 		case tty.Mono:
 			res.Box = &tty.Row{}
-			res.Box.Add(tok, 0, 0)
+			res.Box.Add(tok.Tok, 0, 0)
 			res.Box.Add(sb, 0, 0)
 		}
 
-		return res
+		return res, nil
 	}
 
 	return p.parseExpr6()
 }
 
-func (p *parser) parseExpr6() Expr {
-	cur := p.parseExpr7()
+func (p *parser) parseExpr6() (Expr, *typ.Error) {
+	cur, err := p.parseExpr7()
+
+	if err != nil {
+		return nil, err
+	}
 
 	for {
-		switch p.peek().Typ {
+		tok, err := p.peek(nil, 0, 0)
+
+		if err != nil {
+			return nil, err
+		}
+
+		switch tok.Typ {
 		case lex.DOT:
-			dot := p.next().Tok
-			mem := p.must(lex.IDEN).Tok
 			row := &tty.Row{}
 
-			row.Add(dot, 0, 0)
-			row.Add(mem, 0, 0)
+			if _, err := p.next(row, 0, 0); err != nil {
+				return nil, err
+			}
+
+			mem, err := p.must(lex.IDEN, row, 0, 0)
+
+			if err != nil {
+				return nil, err
+			}
 
 			res := &DotExpr{
 				Ctx: cur,
-				Mem: mem,
+				Mem: mem.Tok,
 			}
 
 			switch cb := cur.Span().(type) {
@@ -1147,58 +1753,108 @@ func (p *parser) parseExpr6() Expr {
 		break
 	}
 
-	return cur
+	return cur, nil
 }
 
-func (p *parser) parseExpr7() Expr {
-	switch p.peek().Typ {
-	case lex.IDEN:
-		iden := p.next().Tok
+func (p *parser) parseExpr7() (Expr, *typ.Error) {
+	tok, err := p.peek(nil, 0, 0)
 
-		switch p.peek().Typ {
+	if err != nil {
+		return nil, err
+	}
+
+	switch tok.Typ {
+	case lex.IDEN:
+		iden, _ := p.next(nil, 0, 0)
+		tok, err = p.peek(nil, 0, 0)
+
+		if err != nil {
+			return nil, err
+		}
+
+		switch tok.Typ {
 		case lex.LP:
-			return p.parseCall(iden)
+			return p.parseCall(iden.Tok)
 		case lex.LB:
-			res := &StructExpr{Sym: iden}
+			res := &StructExpr{Sym: iden.Tok}
 			top := &tty.Row{}
 
-			top.Add(iden, 0, 0)
-			top.Add(p.next().Tok, 0, 0)
+			top.Add(iden.Tok, 0, 0)
 
-			if p.peek().Typ != lex.RB {
+			if _, err := p.next(top, 0, 0); err != nil {
+				return nil, err
+			}
+
+			tok, err = p.peek(top, 0, 0)
+
+			if err != nil {
+				return nil, err
+			}
+
+			if tok.Typ != lex.RB {
 				res.Box = &tty.Box{}
 				res.Box.Add(top, 0, 0)
 
-				for p.peek().Typ != lex.RB {
-					mem := p.parseStructFieldExpr()
-
-					res.Mem = append(res.Mem, mem)
+				for tok.Typ != lex.RB {
+					mem, err := p.parseStructFieldExpr()
 					res.Box.Add(mem.Box, 4, 0)
 
-					if p.peek().Typ != lex.RB {
-						mem.Box.InsertEnd(p.must(lex.COM).Tok, 0)
+					if err != nil {
+						err.Span = res.Box
+						return nil, err
+					}
+
+					res.Mem = append(res.Mem, mem)
+
+					tok, err = p.peek(res.Box, 0, 0)
+
+					if err != nil {
+						return nil, err
+					}
+
+					if tok.Typ != lex.RB {
+						com, err := p.must(lex.COM, nil, 0, 0)
+						mem.Box.InsertEnd(com.Tok, 0)
+
+						if err != nil {
+							err.Span = res.Box
+							return nil, err
+						}
+
 					}
 				}
 			} else {
 				res.Box = top
 			}
 
-			res.Box.Add(p.must(lex.RB).Tok, 0, 0)
+			if _, err := p.must(lex.RB, res.Box, 0, 0); err != nil {
+				return nil, err
+			}
 
-			return res
+			return res, nil
 		}
 
-		return &IdenExpr{Tok: iden}
+		return &IdenExpr{Tok: iden.Tok}, nil
 	case lex.II64, lex.IU64, lex.IF64, lex.TRUE, lex.FALSE:
-		return &BasicExpr{Tok: p.next().Tok}
+		tok, _ := p.next(nil, 0, 0)
+		return &BasicExpr{Tok: tok.Tok}, nil
 	case lex.I64:
 		res := &ToI64Expr{}
 		top := &tty.Row{}
 
-		top.Add(p.next().Tok, 0, 0)
-		top.Add(p.must(lex.LP).Tok, 0, 0)
+		if _, err := p.next(top, 0, 0); err != nil {
+			return nil, err
+		}
 
-		res.X = p.parseExpr0()
+		if _, err := p.must(lex.LP, top, 0, 0); err != nil {
+			return nil, err
+		}
+
+		res.X, err = p.parseExpr0()
+
+		if err != nil {
+			return nil, err
+		}
 
 		switch xb := res.X.Span().(type) {
 		case *tty.Box:
@@ -1211,17 +1867,28 @@ func (p *parser) parseExpr7() Expr {
 			res.Box.Add(xb, 0, 0)
 		}
 
-		res.Box.Add(p.must(lex.RP).Tok, 0, 0)
+		if _, err := p.must(lex.RP, res.Box, 0, 0); err != nil {
+			return nil, err
+		}
 
-		return res
+		return res, nil
 	case lex.U64:
 		res := &ToU64Expr{}
 		top := &tty.Row{}
 
-		top.Add(p.next().Tok, 0, 0)
-		top.Add(p.must(lex.LP).Tok, 0, 0)
+		if _, err := p.next(top, 0, 0); err != nil {
+			return nil, err
+		}
 
-		res.X = p.parseExpr0()
+		if _, err := p.must(lex.LP, top, 0, 0); err != nil {
+			return nil, err
+		}
+
+		res.X, err = p.parseExpr0()
+
+		if err != nil {
+			return nil, err
+		}
 
 		switch xb := res.X.Span().(type) {
 		case *tty.Box:
@@ -1234,17 +1901,28 @@ func (p *parser) parseExpr7() Expr {
 			res.Box.Add(xb, 0, 0)
 		}
 
-		res.Box.Add(p.must(lex.RP).Tok, 0, 0)
+		if _, err := p.must(lex.RP, res.Box, 0, 0); err != nil {
+			return nil, err
+		}
 
-		return res
+		return res, nil
 	case lex.F64:
 		res := &ToF64Expr{}
 		top := &tty.Row{}
 
-		top.Add(p.next().Tok, 0, 0)
-		top.Add(p.must(lex.LP).Tok, 0, 0)
+		if _, err := p.next(top, 0, 0); err != nil {
+			return nil, err
+		}
 
-		res.X = p.parseExpr0()
+		if _, err := p.must(lex.LP, top, 0, 0); err != nil {
+			return nil, err
+		}
+
+		res.X, err = p.parseExpr0()
+
+		if err != nil {
+			return nil, err
+		}
 
 		switch xb := res.X.Span().(type) {
 		case *tty.Box:
@@ -1257,43 +1935,69 @@ func (p *parser) parseExpr7() Expr {
 			res.Box.Add(xb, 0, 0)
 		}
 
-		res.Box.Add(p.must(lex.RP).Tok, 0, 0)
+		if _, err := p.must(lex.RP, res.Box, 0, 0); err != nil {
+			return nil, err
+		}
 
-		return res
+		return res, nil
 	case lex.LP:
 		res := &GroupExpr{}
-		tok := p.next().Tok
-		res.Sub = p.parseExpr0()
+		tok, _ := p.next(nil, 0, 0)
+		res.Sub, err = p.parseExpr0()
+
+		if err != nil {
+			return nil, err
+		}
 
 		switch sb := res.Sub.Span().(type) {
 		case *tty.Box:
 			res.Box = &tty.Box{}
-			res.Box.Add(tok, 0, 0)
+			res.Box.Add(tok.Tok, 0, 0)
 			res.Box.Add(sb, 4, 0)
-			res.Box.Add(p.must(lex.RP).Tok, 0, 0)
 		case tty.Mono:
 			res.Box = &tty.Row{}
-			res.Box.Add(tok, 0, 0)
+			res.Box.Add(tok.Tok, 0, 0)
 			res.Box.Add(sb, 0, 0)
-			res.Box.Add(p.must(lex.RP).Tok, 0, 0)
 		}
 
-		return res
+		if _, err := p.must(lex.RP, res.Box, 0, 0); err != nil {
+			return nil, err
+		}
+
+		return res, nil
 	}
 
-	panic("expression expected")
+	tok.Tok.Hint().Text = "expression expected"
+	tok.Tok.Hint().Attr.Color.Add(color.FgRed)
+
+	return nil, &typ.Error{
+		Span: tok.Tok,
+		Full: "unexpected control sequence",
+		Help: "verify language structuring rules",
+	}
 }
 
-func (p *parser) parseStructFieldExpr() *StructFieldExpr {
+func (p *parser) parseStructFieldExpr() (*StructFieldExpr, *typ.Error) {
 	res := &StructFieldExpr{}
 	top := &tty.Row{}
 
-	res.Mem = p.must(lex.IDEN).Tok
+	mem, err := p.must(lex.IDEN, top, 0, 0)
 
-	top.Add(res.Mem, 0, 0)
-	top.Add(p.must(lex.COL).Tok, 0, 0)
+	if err != nil {
+		return nil, err
+	}
 
-	res.Val = p.parseExpr0()
+	res.Mem = mem.Tok
+
+	if _, err := p.must(lex.COL, top, 0, 0); err != nil {
+		return nil, err
+	}
+
+	res.Val, err = p.parseExpr0()
+
+	if err != nil {
+		return nil, err
+	}
 
 	switch vb := res.Val.Span().(type) {
 	case *tty.Box:
@@ -1306,7 +2010,7 @@ func (p *parser) parseStructFieldExpr() *StructFieldExpr {
 		res.Box.Add(vb, 1, 0)
 	}
 
-	return res
+	return res, nil
 }
 
 func (s *ReturnStmt) Span() tty.Span { return s.Box }

@@ -3,7 +3,6 @@ package tty
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -35,6 +34,7 @@ type Hint struct {
 
 type Span interface {
 	Position() *Position
+	Hint() *Hint
 
 	Draw(w io.Writer)
 	More() bool
@@ -67,6 +67,10 @@ type Tok struct {
 
 func (t *Tok) Position() *Position {
 	return &t.Pos
+}
+
+func (t *Tok) Hint() *Hint {
+	return &t.hint
 }
 
 func (t *Tok) Draw(w io.Writer) {
@@ -117,11 +121,17 @@ func (r *Row) Position() *Position {
 	return &r.Pos
 }
 
+func (r *Row) Hint() *Hint {
+	return &r.hint
+}
+
 func (r *Row) Add(s Span, ir, ib int) {
 	s.Position().Ind.Row = ir
 	s.Position().Ind.Box = 0
 
 	r.Sub = append(r.Sub, s.(Mono))
+	sw, _ := s.Size(true)
+	r.size += sw
 }
 
 func (r *Row) InsertBeg(m Mono, ir int) {
@@ -133,6 +143,8 @@ func (r *Row) InsertBeg(m Mono, ir int) {
 	sub = append(sub, r.Sub...)
 
 	r.Sub = sub
+	sw, _ := m.Size(true)
+	r.size += sw
 }
 
 func (r *Row) InsertEnd(m Mono, ir int) {
@@ -140,6 +152,8 @@ func (r *Row) InsertEnd(m Mono, ir int) {
 	m.Position().Ind.Box = 0
 
 	r.Sub = append(r.Sub, m)
+	sw, _ := m.Size(true)
+	r.size += sw
 }
 
 func (r *Row) Draw(w io.Writer) {
@@ -200,8 +214,7 @@ type Box struct {
 	Pos Position
 	Sub []Span
 
-	hint Hint
-
+	hint   Hint
 	width  int
 	height int
 
@@ -214,6 +227,10 @@ type Box struct {
 
 func (b *Box) Position() *Position {
 	return &b.Pos
+}
+
+func (b *Box) Hint() *Hint {
+	return &b.hint
 }
 
 func (b *Box) Add(s Span, ir, ib int) {
@@ -303,10 +320,11 @@ func (b *Box) Draw(w io.Writer) {
 		}
 
 		b.Sub[b.ent].Draw(w)
+		b.cur = 2
 
 		if !b.Sub[b.ent].More() {
 			if b.que != nil {
-				b.cur = 2
+				b.cur = 3
 			} else {
 				b.ent += 1
 				b.cur = 0
@@ -320,10 +338,11 @@ func (b *Box) Draw(w io.Writer) {
 		}
 
 		b.Sub[b.ent].Draw(w)
+		b.cur = 2
 
 		if !b.Sub[b.ent].More() {
 			if b.que != nil {
-				b.cur = 2
+				b.cur = 3
 			} else {
 				b.ent += 1
 				b.cur = 0
@@ -356,22 +375,25 @@ func (b *Box) Draw(w io.Writer) {
 		switch b.Sub[b.ent].(type) {
 		case Mono:
 			b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.que.offset))
-			b.que.Attr.Color.Fprintf(w, "%s┬", strings.Repeat("─", b.que.size/2-1))
-			b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat("─", b.que.size/2))
+			b.que.Attr.Color.Fprintf(w, "%s┬", strings.Repeat("─", b.que.size/2))
+
+			if b.que.size%2 == 0 {
+				b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat("─", b.que.size/2-1))
+			} else {
+				b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat("─", b.que.size/2))
+			}
 
 			b.cur = 4
 
 		default:
 			b.que.Attr.Color.Fprintf(w, "└──── %s", b.que.Text)
-
 			b.ent += 1
 			b.cur = 0
 		}
 
 	case 4:
-		b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.que.offset+b.que.size/2-1))
+		b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.que.offset+b.que.size/2))
 		b.que.Attr.Color.Fprintf(w, "╰─ %s", b.que.Text)
-
 		b.ent += 1
 		b.cur = 0
 	}
@@ -433,7 +455,6 @@ func (f *Frame) Draw(w io.Writer) {
 		fmt.Fprintf(w, "╭─[ ")
 		color.New(color.FgBlue).Fprintf(w, "%s", f.Name)
 		fmt.Fprintf(w, " ]\n")
-
 		f.cur = 1
 
 	case 1:
@@ -447,7 +468,6 @@ func (f *Frame) Draw(w io.Writer) {
 
 	case 2:
 		fmt.Fprintf(w, "╰────\n")
-
 		f.cur = 3
 	}
 }
@@ -464,9 +484,9 @@ func (*Frame) getHint() *Hint {
 	return nil
 }
 
-func Print(s Span) {
+func Print(w io.Writer, s Span) {
 	for {
-		s.Draw(os.Stdout)
+		s.Draw(w)
 
 		if !s.More() {
 			break
