@@ -62,6 +62,7 @@ type Tok struct {
 	Lit string
 	Pos Position
 
+	ent  int
 	hint Hint
 }
 
@@ -76,10 +77,12 @@ func (t *Tok) Hint() *Hint {
 func (t *Tok) Draw(w io.Writer) {
 	fmt.Fprintf(w, "%s", strings.Repeat(" ", t.Pos.Ind.Row))
 	fmt.Fprintf(w, "%s", t.Lit)
+
+	t.ent = 1
 }
 
 func (t *Tok) More() bool {
-	return false
+	return t.ent == 0
 }
 
 func (t *Tok) Size(i bool) (int, int) {
@@ -113,6 +116,7 @@ type Row struct {
 	Pos Position
 	Sub []Mono
 
+	ent  int
 	hint Hint
 	size int
 }
@@ -162,10 +166,12 @@ func (r *Row) Draw(w io.Writer) {
 	for _, s := range r.Sub {
 		s.Draw(w)
 	}
+
+	r.ent = len(r.Sub)
 }
 
 func (r *Row) More() bool {
-	return false
+	return r.ent < len(r.Sub)
 }
 
 func (r *Row) Size(i bool) (int, int) {
@@ -458,11 +464,15 @@ func (f *Frame) Draw(w io.Writer) {
 		f.cur = 1
 
 	case 1:
-		fmt.Fprintf(w, "│")
-		f.Span.Draw(w)
-		fmt.Fprintln(w)
+		if f.Span.More() {
+			fmt.Fprintf(w, "│")
+			f.Span.Draw(w)
+			fmt.Fprintln(w)
 
-		if !f.Span.More() {
+			if !f.Span.More() {
+				f.cur = 2
+			}
+		} else {
 			f.cur = 2
 		}
 
@@ -485,11 +495,7 @@ func (*Frame) getHint() *Hint {
 }
 
 func Print(w io.Writer, s Span) {
-	for {
+	for s.More() {
 		s.Draw(w)
-
-		if !s.More() {
-			break
-		}
 	}
 }

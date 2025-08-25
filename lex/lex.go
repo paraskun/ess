@@ -226,17 +226,25 @@ func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, *typ.Error) {
 			cur += 1
 
 			if len(s.buf) <= cur || !unicode.IsDigit(s.buf[cur]) {
-				s.buf = s.buf[cur:]
-				s.col += cur
-
 				t.Typ = ERR
-				t.Tok.Lit = string(s.buf[:cur-1])
+
+				if len(s.buf) > cur && s.buf[cur] != '\n' {
+					t.Tok.Lit = string(s.buf[:cur+1])
+				} else {
+					t.Tok.Lit = string(s.buf[:cur])
+				}
+
 				t.Tok.Hint().Text = "malformed floating point literal"
 				t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
 
+				s.buf = s.buf[cur:]
+				s.col += cur
+
 				return nil, &typ.Error{
 					Span: t.Tok,
-					Full: fmt.Sprintf("scanner: malfomed floating point literal at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
+					Full: fmt.Sprintf("scanner: malfomed floating point literal at %d:%d",
+						t.Tok.Pos.Row,
+						t.Tok.Pos.Col),
 					Help: "consider specifying at least one fraction digit",
 				}
 			}
@@ -248,21 +256,23 @@ func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, *typ.Error) {
 	}
 
 	if len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) || s.buf[cur] == '.') {
-		for len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur])) {
+		for len(s.buf) > cur && (unicode.IsLetter(s.buf[cur]) || unicode.IsDigit(s.buf[cur]) || s.buf[cur] == '.') {
 			cur += 1
 		}
+
+		t.Typ = ERR
+		t.Tok.Lit = string(s.buf[:cur])
+		t.Tok.Hint().Text = "malformed numeric literal"
+		t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
 
 		s.col += cur
 		s.buf = s.buf[cur:]
 
-		t.Typ = ERR
-		t.Tok.Lit = string(s.buf[:cur-1])
-		t.Tok.Hint().Text = "malformed numeric literal"
-		t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
-
 		return nil, &typ.Error{
 			Span: t.Tok,
-			Full: fmt.Sprintf("scanner: malfomed numeric literal at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
+			Full: fmt.Sprintf("scanner: malfomed numeric literal at %d:%d",
+				t.Tok.Pos.Row,
+				t.Tok.Pos.Col),
 			Help: "verify surrounding expression correctness",
 		}
 	}

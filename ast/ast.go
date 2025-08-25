@@ -542,6 +542,8 @@ func (p *parser) parseFuncDecl() (*FuncDecl, *typ.Error) {
 		return nil, err
 	}
 
+	top.Add(dec.Sig, 1, 0)
+
 	if tok, err := p.mustIn(lex.IDEN, dec.Sig, 0, 0); err != nil {
 		err.Span = top
 		return nil, err
@@ -621,7 +623,6 @@ func (p *parser) parseFuncDecl() (*FuncDecl, *typ.Error) {
 		}
 	}
 
-	top.Add(dec.Sig, 1, 0)
 	tok, err = p.peekIn(top, 1, 0)
 
 	if err != nil {
@@ -630,19 +631,19 @@ func (p *parser) parseFuncDecl() (*FuncDecl, *typ.Error) {
 	}
 
 	if tok.Typ == lex.LB {
-		if _, err := p.nextIn(top, 1, 0); err != nil {
-			err.Span = top
-			return nil, err
-		}
+		p.nextIn(top, 1, 0)
 
 		dec.Box = &tty.Box{}
 		dec.Box.Add(top, 0, 0)
-		dec.Sub, err = p.parseBlockStmt(dec.Box, Indent, 0)
+		dec.Sub, err = p.parseBlockStmt()
 
 		if err != nil {
+			dec.Box.Add(err.Span, Indent, 0)
 			err.Span = dec.Box
 			return nil, err
 		}
+
+		dec.Box.Add(dec.Sub.Span(), Indent, 0)
 
 		if _, err := p.mustIn(lex.RB, dec.Box, 0, 0); err != nil {
 			err.Span = dec.Box
@@ -838,9 +839,9 @@ func (p *parser) parseTypeSpec(g tty.Group, r, b int) (*TypeSpec, *typ.Error) {
 	}
 }
 
-func (p *parser) parseBlockStmt(g tty.Group, r, b int) (*BlockStmt, *typ.Error) {
+func (p *parser) parseBlockStmt() (*BlockStmt, *typ.Error) {
 	res := &BlockStmt{}
-	tok, err := p.peekIn(g, r, b)
+	tok, err := p.peek()
 
 	if err != nil {
 		return nil, err
@@ -848,7 +849,6 @@ func (p *parser) parseBlockStmt(g tty.Group, r, b int) (*BlockStmt, *typ.Error) 
 
 	if tok.Typ != lex.RB {
 		res.Box = &tty.Box{}
-		g.Add(res.Box, r, b)
 
 		for {
 			tok, err := p.peekIn(res.Box, 0, 0)
@@ -865,16 +865,16 @@ func (p *parser) parseBlockStmt(g tty.Group, r, b int) (*BlockStmt, *typ.Error) 
 			sub, err := p.parseStmt()
 
 			if err != nil {
+				res.Box.Add(err.Span, 0, 0)
 				err.Span = res.Box
 				return nil, err
 			}
 
-			res.Sub = append(res.Sub, sub)
 			res.Box.Add(sub.Span(), 0, 0)
+			res.Sub = append(res.Sub, sub)
 		}
 	} else {
 		res.Box = &tty.Row{}
-		g.Add(res.Box, r, b)
 	}
 
 	return res, nil
@@ -1069,9 +1069,27 @@ func (p *parser) parseCall(sym *tty.Tok) (*CallExpr, *typ.Error) {
 		arg, err := p.parseExpr0()
 
 		if err != nil {
-			switch err.Span.(type) {
+			switch b := err.Span.(type) {
 			case *tty.Box:
+				if len(row.Sub) != 0 {
+					box.Add(row, Indent, 0)
+				}
+
+				box.Add(b, Indent, 0)
+				res.Box = box
 			case tty.Mono:
+				if len(row.Sub) != 0 {
+					row.Add(b, 1, 0)
+				} else {
+					row.Add(b, 0, 0)
+				}
+
+				if len(box.Sub) != 0 {
+					box.Add(row, Indent, 0)
+					res.Box = box
+				} else {
+					res.Box = row
+				}
 			}
 
 			err.Span = res.Box
@@ -1154,24 +1172,40 @@ func (p *parser) parseVarStmt() (*VarStmt, *typ.Error) {
 	top := &tty.Row{}
 
 	if _, err := p.mustIn(lex.VAR, top, 0, 0); err != nil {
+		err.Span = top
 		return nil, err
 	}
 
 	tok, err := p.mustIn(lex.IDEN, top, 1, 0)
 
 	if err != nil {
+		err.Span = top
 		return nil, err
 	}
 
 	res := &VarStmt{Var: tok.Tok}
 
 	if _, err := p.mustIn(lex.EQ, top, 1, 0); err != nil {
+		err.Span = top
 		return nil, err
 	}
 
 	res.Ini, err = p.parseExpr0()
 
 	if err != nil {
+		switch b := err.Span.(type) {
+		case *tty.Box:
+			res.Box = &tty.Box{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(b, Indent, 0)
+		case tty.Mono:
+			res.Box = &tty.Row{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(b, 1, 0)
+		}
+
+		err.Span = res.Box
+
 		return nil, err
 	}
 
@@ -1201,24 +1235,40 @@ func (p *parser) parseLetStmt() (*LetStmt, *typ.Error) {
 	top := &tty.Row{}
 
 	if _, err := p.mustIn(lex.LET, top, 0, 0); err != nil {
+		err.Span = top
 		return nil, err
 	}
 
 	tok, err := p.mustIn(lex.IDEN, top, 1, 0)
 
 	if err != nil {
+		err.Span = top
 		return nil, err
 	}
 
 	res := &LetStmt{Var: tok.Tok}
 
 	if _, err := p.mustIn(lex.EQ, top, 1, 0); err != nil {
+		err.Span = top
 		return nil, err
 	}
 
 	res.Ini, err = p.parseExpr0()
 
 	if err != nil {
+		switch b := err.Span.(type) {
+		case *tty.Box:
+			res.Box = &tty.Box{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(b, Indent, 0)
+		case tty.Mono:
+			res.Box = &tty.Row{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(b, 1, 0)
+		}
+
+		err.Span = res.Box
+
 		return nil, err
 	}
 
@@ -1255,6 +1305,19 @@ func (p *parser) parseLoopStmt() (*LoopStmt, *typ.Error) {
 	res.Con, err = p.parseExpr0()
 
 	if err != nil {
+		switch b := err.Span.(type) {
+		case *tty.Box:
+			res.Box.Add(tok.Tok, 0, 0)
+			res.Box.Add(b, Indent, 0)
+		case tty.Mono:
+			row := &tty.Row{}
+			row.Add(tok.Tok, 0, 0)
+			row.Add(b, 1, 0)
+			res.Box.Add(row, 0, 0)
+		}
+
+		err.Span = res.Box
+
 		return nil, err
 	}
 
@@ -1265,29 +1328,36 @@ func (p *parser) parseLoopStmt() (*LoopStmt, *typ.Error) {
 		log = &tty.Box{}
 		log.Add(tok.Tok, 0, 0)
 		log.Add(res.Con.Span(), 4, 0)
+		res.Box.Add(log, 0, 0)
 
 		if _, err := p.mustIn(lex.LB, log, 0, 0); err != nil {
+			err.Span = res.Box
 			return nil, err
 		}
 	case tty.Mono:
 		log = &tty.Row{}
 		log.Add(tok.Tok, 0, 0)
 		log.Add(res.Con.Span(), 1, 0)
+		res.Box.Add(log, 0, 0)
 
 		if _, err := p.mustIn(lex.LB, log, 1, 0); err != nil {
+			err.Span = res.Box
 			return nil, err
 		}
 	}
 
-	res.Box.Add(log, 0, 0)
-	res.Sub, err = p.parseBlockStmt(res.Box, Indent, 0)
+	res.Sub, err = p.parseBlockStmt()
 
 	if err != nil {
+		res.Box.Add(err.Span, Indent, 0)
 		err.Span = res.Box
 		return nil, err
 	}
 
+	res.Box.Add(res.Sub.Span(), Indent, 0)
+
 	if _, err := p.mustIn(lex.RB, res.Box, 0, 0); err != nil {
+		err.Span = res.Box
 		return nil, err
 	}
 
@@ -1305,6 +1375,19 @@ func (p *parser) parseCondStmt() (*CondStmt, *typ.Error) {
 	res.Con, err = p.parseExpr0()
 
 	if err != nil {
+		switch b := err.Span.(type) {
+		case *tty.Box:
+			res.Box.Add(tok.Tok, 0, 0)
+			res.Box.Add(b, Indent, 0)
+		case tty.Mono:
+			row := &tty.Row{}
+			row.Add(tok.Tok, 0, 0)
+			row.Add(b, 1, 0)
+			res.Box.Add(row, 0, 0)
+		}
+
+		err.Span = res.Box
+
 		return nil, err
 	}
 
@@ -1315,29 +1398,36 @@ func (p *parser) parseCondStmt() (*CondStmt, *typ.Error) {
 		log = &tty.Box{}
 		log.Add(tok.Tok, 0, 0)
 		log.Add(res.Con.Span(), 4, 0)
+		res.Box.Add(log, 0, 0)
 
 		if _, err := p.mustIn(lex.LB, log, 0, 0); err != nil {
+			err.Span = res.Box
 			return nil, err
 		}
 	case tty.Mono:
 		log = &tty.Row{}
 		log.Add(tok.Tok, 0, 0)
 		log.Add(res.Con.Span(), 1, 0)
+		res.Box.Add(log, 0, 0)
 
 		if _, err := p.mustIn(lex.LB, log, 1, 0); err != nil {
+			err.Span = res.Box
 			return nil, err
 		}
 	}
 
-	res.Box.Add(log, 0, 0)
-	res.Pos, err = p.parseBlockStmt(res.Box, Indent, 0)
+	res.Pos, err = p.parseBlockStmt()
 
 	if err != nil {
+		res.Box.Add(err.Span, Indent, 0)
 		err.Span = res.Box
 		return nil, err
 	}
 
+	res.Box.Add(res.Pos.Span(), Indent, 0)
+
 	if _, err := p.mustIn(lex.RB, res.Box, 0, 0); err != nil {
+		err.Span = res.Box
 		return nil, err
 	}
 
@@ -1362,14 +1452,18 @@ func (p *parser) parseCondStmt() (*CondStmt, *typ.Error) {
 			return nil, err
 		}
 
-		res.Neg, err = p.parseBlockStmt(res.Box, Indent, 0)
+		res.Neg, err = p.parseBlockStmt()
 
 		if err != nil {
+			res.Box.Add(err.Span, Indent, 0)
 			err.Span = res.Box
 			return nil, err
 		}
 
+		res.Box.Add(res.Neg.Span(), Indent, 0)
+
 		if _, err := p.mustIn(lex.RB, res.Box, 0, 0); err != nil {
+			err.Span = res.Box
 			return nil, err
 		}
 	}
@@ -1388,6 +1482,7 @@ func (p *parser) parseReturnStmt() (*ReturnStmt, *typ.Error) {
 	tok, err := p.peekIn(top, 1, 0)
 
 	if err != nil {
+		err.Span = top
 		return nil, err
 	}
 
@@ -1397,6 +1492,19 @@ func (p *parser) parseReturnStmt() (*ReturnStmt, *typ.Error) {
 		res.Ret, err = p.parseExpr0()
 
 		if err != nil {
+			switch b := err.Span.(type) {
+			case *tty.Box:
+				box := &tty.Box{}
+				box.Add(top, 0, 0)
+				box.Add(b, Indent, 0)
+				res.Box = box
+			case tty.Mono:
+				top.Add(b, 1, 0)
+				res.Box = top
+			}
+
+			err.Span = res.Box
+
 			return nil, err
 		}
 
@@ -1404,7 +1512,7 @@ func (p *parser) parseReturnStmt() (*ReturnStmt, *typ.Error) {
 		case *tty.Box:
 			box := &tty.Box{}
 			box.Add(top, 0, 0)
-			box.Add(rb, 4, 0)
+			box.Add(rb, Indent, 0)
 			res.Box = box
 		case tty.Mono:
 			top.Add(rb, 1, 0)
@@ -1418,7 +1526,6 @@ func (p *parser) parseReturnStmt() (*ReturnStmt, *typ.Error) {
 
 	if err != nil {
 		err.Span = res.Box
-
 		return nil, err
 	}
 
@@ -1436,6 +1543,12 @@ func (p *parser) parseExpr0() (Expr, *typ.Error) {
 		tok, err := p.peek()
 
 		if err != nil {
+			box := &tty.Box{}
+			box.Add(cur.Span(), 0, 0)
+			box.InsertEnd(err.Span.(tty.Mono), 1)
+
+			err.Span = box
+
 			return nil, err
 		}
 
@@ -1447,6 +1560,31 @@ func (p *parser) parseExpr0() (Expr, *typ.Error) {
 			res.Y, err = p.parseExpr1()
 
 			if err != nil {
+				switch yb := err.Span.(type) {
+				case *tty.Box:
+					yb.InsertBeg(tok.Tok, 1)
+
+					res.Box = &tty.Box{}
+					res.Box.Add(cur.Span(), 0, 0)
+					res.Box.Add(yb, Indent, 0)
+				case tty.Mono:
+					row := &tty.Row{}
+					row.Add(tok.Tok, 0, 0)
+					row.Add(yb, 1, 0)
+
+					switch xb := cur.Span().(type) {
+					case *tty.Box:
+						xb.InsertEnd(row, 1)
+						res.Box = xb
+					case tty.Mono:
+						res.Box = &tty.Row{}
+						res.Box.Add(xb, 0, 0)
+						res.Box.Add(row, 1, 0)
+					}
+				}
+
+				err.Span = res.Box
+
 				return nil, err
 			}
 
@@ -1496,6 +1634,12 @@ func (p *parser) parseExpr1() (Expr, *typ.Error) {
 		tok, err := p.peek()
 
 		if err != nil {
+			box := &tty.Box{}
+			box.Add(cur.Span(), 0, 0)
+			box.InsertEnd(err.Span.(tty.Mono), 1)
+
+			err.Span = box
+
 			return nil, err
 		}
 
@@ -1507,6 +1651,31 @@ func (p *parser) parseExpr1() (Expr, *typ.Error) {
 			res.Y, err = p.parseExpr2()
 
 			if err != nil {
+				switch yb := err.Span.(type) {
+				case *tty.Box:
+					yb.InsertBeg(tok.Tok, 1)
+
+					res.Box = &tty.Box{}
+					res.Box.Add(cur.Span(), 0, 0)
+					res.Box.Add(yb, Indent, 0)
+				case tty.Mono:
+					row := &tty.Row{}
+					row.Add(tok.Tok, 0, 0)
+					row.Add(yb, 1, 0)
+
+					switch xb := cur.Span().(type) {
+					case *tty.Box:
+						xb.InsertEnd(row, 1)
+						res.Box = xb
+					case tty.Mono:
+						res.Box = &tty.Row{}
+						res.Box.Add(xb, 0, 0)
+						res.Box.Add(row, 1, 0)
+					}
+				}
+
+				err.Span = res.Box
+
 				return nil, err
 			}
 
@@ -1557,6 +1726,12 @@ func (p *parser) parseExpr2() (Expr, *typ.Error) {
 		tok, err := p.peek()
 
 		if err != nil {
+			box := &tty.Box{}
+			box.Add(cur.Span(), 0, 0)
+			box.InsertEnd(err.Span.(tty.Mono), 1)
+
+			err.Span = box
+
 			return nil, err
 		}
 
@@ -1568,6 +1743,31 @@ func (p *parser) parseExpr2() (Expr, *typ.Error) {
 			res.Y, err = p.parseExpr3()
 
 			if err != nil {
+				switch yb := err.Span.(type) {
+				case *tty.Box:
+					yb.InsertBeg(tok.Tok, 1)
+
+					res.Box = &tty.Box{}
+					res.Box.Add(cur.Span(), 0, 0)
+					res.Box.Add(yb, Indent, 0)
+				case tty.Mono:
+					row := &tty.Row{}
+					row.Add(tok.Tok, 0, 0)
+					row.Add(yb, 1, 0)
+
+					switch xb := cur.Span().(type) {
+					case *tty.Box:
+						xb.InsertEnd(row, 1)
+						res.Box = xb
+					case tty.Mono:
+						res.Box = &tty.Row{}
+						res.Box.Add(xb, 0, 0)
+						res.Box.Add(row, 1, 0)
+					}
+				}
+
+				err.Span = res.Box
+
 				return nil, err
 			}
 
@@ -1617,6 +1817,12 @@ func (p *parser) parseExpr3() (Expr, *typ.Error) {
 		tok, err := p.peek()
 
 		if err != nil {
+			box := &tty.Box{}
+			box.Add(cur.Span(), 0, 0)
+			box.InsertEnd(err.Span.(tty.Mono), 1)
+
+			err.Span = box
+
 			return nil, err
 		}
 
@@ -1628,6 +1834,31 @@ func (p *parser) parseExpr3() (Expr, *typ.Error) {
 			res.Y, err = p.parseExpr4()
 
 			if err != nil {
+				switch yb := err.Span.(type) {
+				case *tty.Box:
+					yb.InsertBeg(tok.Tok, 1)
+
+					res.Box = &tty.Box{}
+					res.Box.Add(cur.Span(), 0, 0)
+					res.Box.Add(yb, Indent, 0)
+				case tty.Mono:
+					row := &tty.Row{}
+					row.Add(tok.Tok, 0, 0)
+					row.Add(yb, 1, 0)
+
+					switch xb := cur.Span().(type) {
+					case *tty.Box:
+						xb.InsertEnd(row, 1)
+						res.Box = xb
+					case tty.Mono:
+						res.Box = &tty.Row{}
+						res.Box.Add(xb, 0, 0)
+						res.Box.Add(row, 1, 0)
+					}
+				}
+
+				err.Span = res.Box
+
 				return nil, err
 			}
 
@@ -1677,6 +1908,12 @@ func (p *parser) parseExpr4() (Expr, *typ.Error) {
 		tok, err := p.peek()
 
 		if err != nil {
+			box := &tty.Box{}
+			box.Add(cur.Span(), 0, 0)
+			box.InsertEnd(err.Span.(tty.Mono), 1)
+
+			err.Span = box
+
 			return nil, err
 		}
 
@@ -1688,6 +1925,31 @@ func (p *parser) parseExpr4() (Expr, *typ.Error) {
 			res.Y, err = p.parseExpr5()
 
 			if err != nil {
+				switch yb := err.Span.(type) {
+				case *tty.Box:
+					yb.InsertBeg(tok.Tok, 1)
+
+					res.Box = &tty.Box{}
+					res.Box.Add(cur.Span(), 0, 0)
+					res.Box.Add(yb, Indent, 0)
+				case tty.Mono:
+					row := &tty.Row{}
+					row.Add(tok.Tok, 0, 0)
+					row.Add(yb, 1, 0)
+
+					switch xb := cur.Span().(type) {
+					case *tty.Box:
+						xb.InsertEnd(row, 1)
+						res.Box = xb
+					case tty.Mono:
+						res.Box = &tty.Row{}
+						res.Box.Add(xb, 0, 0)
+						res.Box.Add(row, 1, 0)
+					}
+				}
+
+				err.Span = res.Box
+
 				return nil, err
 			}
 
@@ -1741,6 +2003,18 @@ func (p *parser) parseExpr5() (Expr, *typ.Error) {
 		res.X, err = p.parseExpr5()
 
 		if err != nil {
+			switch b := err.Span.(type) {
+			case *tty.Box:
+				b.InsertBeg(tok.Tok, 0)
+				res.Box = b
+			case tty.Mono:
+				res.Box = &tty.Row{}
+				res.Box.Add(tok.Tok, 0, 0)
+				res.Box.Add(b, 0, 0)
+			}
+
+			err.Span = res.Box
+
 			return nil, err
 		}
 
@@ -1771,20 +2045,34 @@ func (p *parser) parseExpr6() (Expr, *typ.Error) {
 		tok, err := p.peek()
 
 		if err != nil {
+			box := &tty.Box{}
+			box.Add(cur.Span(), 0, 0)
+			box.InsertEnd(err.Span.(tty.Mono), 1)
+
+			err.Span = box
+
 			return nil, err
 		}
 
 		switch tok.Typ {
 		case lex.DOT:
 			row := &tty.Row{}
-
-			if _, err := p.nextIn(row, 0, 0); err != nil {
-				return nil, err
-			}
+			p.nextIn(row, 0, 0)
 
 			mem, err := p.mustIn(lex.IDEN, row, 0, 0)
 
 			if err != nil {
+				switch cb := cur.Span().(type) {
+				case *tty.Box:
+					cb.InsertEnd(row, 0)
+					err.Span = cb
+				case tty.Mono:
+					box := &tty.Row{}
+					box.Add(cb, 0, 0)
+					box.Add(row, 0, 0)
+					err.Span = box
+				}
+
 				return nil, err
 			}
 
@@ -1823,10 +2111,12 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 
 	switch tok.Typ {
 	case lex.IDEN:
-		iden, _ := p.next()
-		tok, err = p.peek()
+		top := &tty.Row{}
+		iden, _ := p.nextIn(top, 0, 0)
+		tok, err = p.peekIn(top, 1, 0)
 
 		if err != nil {
+			err.Span = top
 			return nil, err
 		}
 
@@ -1835,17 +2125,12 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 			return p.parseCall(iden.Tok)
 		case lex.LB:
 			res := &StructExpr{Sym: iden.Tok}
-			top := &tty.Row{}
 
-			top.Add(iden.Tok, 0, 0)
-
-			if _, err := p.nextIn(top, 0, 0); err != nil {
-				return nil, err
-			}
-
-			tok, err = p.peekIn(top, 0, 0)
+			top.Add(tok.Tok, 0, 0)
+			tok, err = p.peekIn(top, 1, 0)
 
 			if err != nil {
+				err.Span = top
 				return nil, err
 			}
 
@@ -1855,30 +2140,33 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 
 				for tok.Typ != lex.RB {
 					mem, err := p.parseStructFieldExpr()
-					res.Box.Add(mem.Box, 4, 0)
+
+					if err != nil {
+						res.Box.Add(err.Span, Indent, 0)
+						err.Span = res.Box
+						return nil, err
+					}
+
+					res.Box.Add(mem.Box, Indent, 0)
+					res.Mem = append(res.Mem, mem)
+
+					tok, err = p.peekIn(res.Box, 0, 0)
 
 					if err != nil {
 						err.Span = res.Box
 						return nil, err
 					}
 
-					res.Mem = append(res.Mem, mem)
-
-					tok, err = p.peekIn(res.Box, 0, 0)
-
-					if err != nil {
-						return nil, err
-					}
-
 					if tok.Typ != lex.RB {
 						com, err := p.mustIn(lex.COM, nil, 0, 0)
-						mem.Box.InsertEnd(com.Tok, 0)
 
 						if err != nil {
+							mem.Box.InsertEnd(err.Span.(tty.Mono), 1)
 							err.Span = res.Box
 							return nil, err
 						}
 
+						mem.Box.InsertEnd(com.Tok, 0)
 					}
 				}
 			} else {
@@ -1886,6 +2174,7 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 			}
 
 			if _, err := p.mustIn(lex.RB, res.Box, 0, 0); err != nil {
+				err.Span = res.Box
 				return nil, err
 			}
 
@@ -1901,16 +2190,31 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		top := &tty.Row{}
 
 		if _, err := p.nextIn(top, 0, 0); err != nil {
+			err.Span = top
 			return nil, err
 		}
 
 		if _, err := p.mustIn(lex.LP, top, 0, 0); err != nil {
+			err.Span = top
 			return nil, err
 		}
 
 		res.X, err = p.parseExpr0()
 
 		if err != nil {
+			switch b := err.Span.(type) {
+			case *tty.Box:
+				res.Box = &tty.Box{}
+				res.Box.Add(top, 0, 0)
+				res.Box.Add(b, Indent, 0)
+			case tty.Mono:
+				res.Box = &tty.Row{}
+				res.Box.Add(top, 0, 0)
+				res.Box.Add(b, 0, 0)
+			}
+
+			err.Span = res.Box
+
 			return nil, err
 		}
 
@@ -1926,6 +2230,7 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		}
 
 		if _, err := p.mustIn(lex.RP, res.Box, 0, 0); err != nil {
+			err.Span = res.Box
 			return nil, err
 		}
 
@@ -1935,16 +2240,31 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		top := &tty.Row{}
 
 		if _, err := p.nextIn(top, 0, 0); err != nil {
+			err.Span = top
 			return nil, err
 		}
 
 		if _, err := p.mustIn(lex.LP, top, 0, 0); err != nil {
+			err.Span = top
 			return nil, err
 		}
 
 		res.X, err = p.parseExpr0()
 
 		if err != nil {
+			switch b := err.Span.(type) {
+			case *tty.Box:
+				res.Box = &tty.Box{}
+				res.Box.Add(top, 0, 0)
+				res.Box.Add(b, Indent, 0)
+			case tty.Mono:
+				res.Box = &tty.Row{}
+				res.Box.Add(top, 0, 0)
+				res.Box.Add(b, 0, 0)
+			}
+
+			err.Span = res.Box
+
 			return nil, err
 		}
 
@@ -1960,6 +2280,7 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		}
 
 		if _, err := p.mustIn(lex.RP, res.Box, 0, 0); err != nil {
+			err.Span = res.Box
 			return nil, err
 		}
 
@@ -1969,16 +2290,31 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		top := &tty.Row{}
 
 		if _, err := p.nextIn(top, 0, 0); err != nil {
+			err.Span = top
 			return nil, err
 		}
 
 		if _, err := p.mustIn(lex.LP, top, 0, 0); err != nil {
+			err.Span = top
 			return nil, err
 		}
 
 		res.X, err = p.parseExpr0()
 
 		if err != nil {
+			switch b := err.Span.(type) {
+			case *tty.Box:
+				res.Box = &tty.Box{}
+				res.Box.Add(top, 0, 0)
+				res.Box.Add(b, Indent, 0)
+			case tty.Mono:
+				res.Box = &tty.Row{}
+				res.Box.Add(top, 0, 0)
+				res.Box.Add(b, 0, 0)
+			}
+
+			err.Span = res.Box
+
 			return nil, err
 		}
 
@@ -1994,6 +2330,7 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		}
 
 		if _, err := p.mustIn(lex.RP, res.Box, 0, 0); err != nil {
+			err.Span = res.Box
 			return nil, err
 		}
 
@@ -2004,6 +2341,19 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		res.Sub, err = p.parseExpr0()
 
 		if err != nil {
+			switch b := err.Span.(type) {
+			case *tty.Box:
+				res.Box = &tty.Box{}
+				res.Box.Add(tok.Tok, 0, 0)
+				res.Box.Add(b, Indent, 0)
+			case tty.Mono:
+				res.Box = &tty.Row{}
+				res.Box.Add(tok.Tok, 0, 0)
+				res.Box.Add(b, 0, 0)
+			}
+
+			err.Span = res.Box
+
 			return nil, err
 		}
 
@@ -2011,7 +2361,7 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		case *tty.Box:
 			res.Box = &tty.Box{}
 			res.Box.Add(tok.Tok, 0, 0)
-			res.Box.Add(sb, 4, 0)
+			res.Box.Add(sb, Indent, 0)
 		case tty.Mono:
 			res.Box = &tty.Row{}
 			res.Box.Add(tok.Tok, 0, 0)
@@ -2019,6 +2369,7 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		}
 
 		if _, err := p.mustIn(lex.RP, res.Box, 0, 0); err != nil {
+			err.Span = res.Box
 			return nil, err
 		}
 
@@ -2042,18 +2393,33 @@ func (p *parser) parseStructFieldExpr() (*StructFieldExpr, *typ.Error) {
 	mem, err := p.mustIn(lex.IDEN, top, 0, 0)
 
 	if err != nil {
+		err.Span = top
 		return nil, err
 	}
 
 	res.Mem = mem.Tok
 
 	if _, err := p.mustIn(lex.COL, top, 0, 0); err != nil {
+		err.Span = top
 		return nil, err
 	}
 
 	res.Val, err = p.parseExpr0()
 
 	if err != nil {
+		switch b := err.Span.(type) {
+		case *tty.Box:
+			res.Box = &tty.Box{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(b, Indent, 0)
+		case tty.Mono:
+			res.Box = &tty.Row{}
+			res.Box.Add(top, 0, 0)
+			res.Box.Add(b, 1, 0)
+		}
+
+		err.Span = res.Box
+
 		return nil, err
 	}
 
@@ -2061,7 +2427,7 @@ func (p *parser) parseStructFieldExpr() (*StructFieldExpr, *typ.Error) {
 	case *tty.Box:
 		res.Box = &tty.Box{}
 		res.Box.Add(top, 0, 0)
-		res.Box.Add(vb, 4, 0)
+		res.Box.Add(vb, Indent, 0)
 	case tty.Mono:
 		res.Box = &tty.Row{}
 		res.Box.Add(top, 0, 0)

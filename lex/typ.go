@@ -159,7 +159,7 @@ var str = map[Type]string{
 	GE:  ">=",
 	EEQ: "==",
 	NE:  "!=",
-	EQ:  "=",
+	EQ:  "assignment",
 
 	LAND: "&&",
 	LOR:  "||",
