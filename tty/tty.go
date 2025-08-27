@@ -244,6 +244,9 @@ func (b *Box) Add(s Span, ir, ib int) {
 	s.Position().Ind.Box = ib
 
 	b.Sub = append(b.Sub, s)
+
+	_, sh := s.Size(true)
+	b.height += sh
 }
 
 func (b *Box) InsertBeg(m Mono, ir int) {

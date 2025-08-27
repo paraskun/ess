@@ -1,5 +1,3 @@
-//go:build ignore
-
 package ast
 
 import (
@@ -20,7 +18,7 @@ func Typeset(pkg *mod.Package) {
 	pkg.Env = typ.New(nil)
 	typ := typer{pkg: pkg, env: pkg.Env}
 
-	for _, src := range pkg.XSrc {
+	for _, src := range pkg.Src {
 		src.Env = pkg.Env
 
 		for _, dec := range src.Dec.(*File).Dec {
@@ -45,29 +43,19 @@ func (t *typer) VisitDecl(u Decl) {
 }
 
 func (t *typer) visitUseDecl(d *UseDecl) {
-	if d.Pkg == nil {
-		return
-	}
-
 	// Ignore an error, if multiple files using same package.
-	_ = t.typ.Insert(d.Pkg.Name, &typ.Object{
-		Cap: typ.C_ADR,
-		Typ: &typ.Type{
-			Kind:  typ.PKG,
-			Extra: d.Pkg,
-		},
-	})
+	_ = t.env.Insert(d.Pkg.Lit[0:len(d.Pkg.Lit)-1], d.Obj)
 
-	Typeset(d.Pkg)
+	Typeset(d.Obj.Typ.Extra.(*mod.Package))
 }
 
 func (t *typer) visitVarDecl(d *VarDecl) {
 	d.Ini.Accept(t)
 
-	if err := t.typ.Insert(d.Idf.Lit, &typ.Object{
-		Cap: typ.C_ADR,
-		Typ: d.Ini.Type(),
-		Val: d.Ini.(*ImmExpr).Obj.Val, // TODO: expression evaluation
+	if err := t.env.Insert(d.Var.Lit, &typ.Object{
+		Seg: typ.PackageData,
+		Typ: d.Ini.Object().Typ,
+		Val: d.Ini.Object().Val,
 	}); err != nil {
 		panic(err)
 	}
@@ -77,14 +65,14 @@ func (t *typer) visitFuncDecl(d *FuncDecl) {
 	d.Env = typ.New(t.env)
 	d.Obj = &typ.Object{Typ: t.funcSpec(d)}
 
-	if err := t.typ.Insert(d.Idf.Lit, d.Obj); err != nil {
+	if err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
 		panic(err)
 	}
 
 	t.env = d.Env
 	t.fun = d.Obj.Typ.Extra.(*typ.Func)
 
-	d.Body.Accept(t)
+	d.Sub.Accept(t)
 
 	t.fun = nil
 	t.env = d.Env.Parent
@@ -105,16 +93,16 @@ func (t *typer) funcSpec(d *FuncDecl) *typ.Type {
 		}
 
 		obj := &typ.Object{
-			Cap: typ.C_ADR | typ.C_MOD,
+			Seg: typ.DynamicData,
 			Typ: arg.Typ.Typ,
 		}
 
-		if err := t.typ.Insert(arg.Tok.Lit, obj); err != nil {
+		if err := d.Env.Insert(arg.Sym.Lit, obj); err != nil {
 			panic(err)
 		}
 
 		e.Arg = append(e.Arg, &typ.Field{
-			Name: arg.Tok.Lit,
+			Name: arg.Sym.Lit,
 			Typ:  obj.Typ,
 		})
 	}

@@ -480,6 +480,7 @@ func (p *parser) parseDecl() (Decl, *typ.Error) {
 		}
 
 		use.Obj = &typ.Object{
+			Seg: typ.Abstract,
 			Typ: &typ.Type{
 				Kind:  typ.PKG,
 				Extra: pkg,
@@ -504,7 +505,8 @@ func (p *parser) parseDecl() (Decl, *typ.Error) {
 	case lex.ENUM:
 		return p.parseEnumDecl()
 	default:
-		tok.Tok.Hint().Text = "declaration expected here"
+		row, col := tok.Tok.Pos.Row, tok.Tok.Pos.Col
+		tok.Tok.Hint().Text = fmt.Sprintf("%d:%d - declaration expected here", row, col)
 		tok.Tok.Hint().Attr.Color.Add(color.FgRed)
 
 		return nil, &typ.Error{
@@ -829,7 +831,8 @@ func (p *parser) parseTypeSpec(g tty.Group, r, b int) (*TypeSpec, *typ.Error) {
 		return &TypeSpec{Tok: tok.Tok}, nil
 	}
 
-	tok.Tok.Hint().Text = "type specification expected here"
+	row, col := tok.Tok.Pos.Row, tok.Tok.Pos.Col
+	tok.Tok.Hint().Text = fmt.Sprintf("%d:%d - type specification expected here", row, col)
 	tok.Tok.Hint().Attr.Color.Add(color.FgRed)
 
 	return nil, &typ.Error{
@@ -1030,7 +1033,8 @@ func (p *parser) parseStmt() (Stmt, *typ.Error) {
 		return p.parseReturnStmt()
 	}
 
-	tok.Tok.Hint().Text = "statement expected"
+	row, col := tok.Tok.Pos.Row, tok.Tok.Pos.Col
+	tok.Tok.Hint().Text = fmt.Sprintf("%d:%d - statement expected here", row, col)
 	tok.Tok.Hint().Attr.Color.Add(color.FgRed)
 
 	return nil, &typ.Error{
@@ -2126,7 +2130,7 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		case lex.LB:
 			res := &StructExpr{Sym: iden.Tok}
 
-			top.Add(tok.Tok, 0, 0)
+			_, _ = p.nextIn(top, 0, 0)
 			tok, err = p.peekIn(top, 1, 0)
 
 			if err != nil {
@@ -2137,6 +2141,9 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 			if tok.Typ != lex.RB {
 				res.Box = &tty.Box{}
 				res.Box.Add(top, 0, 0)
+
+				// res.Box.Hint().Text = "right here"
+				// res.Box.Hint().Attr.Color.Add(color.FgRed)
 
 				for tok.Typ != lex.RB {
 					mem, err := p.parseStructFieldExpr()
@@ -2376,7 +2383,8 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		return res, nil
 	}
 
-	tok.Tok.Hint().Text = "expression expected"
+	row, col := tok.Tok.Pos.Row, tok.Tok.Pos.Col
+	tok.Tok.Hint().Text = fmt.Sprintf("%d:%d - expression expected here", row, col)
 	tok.Tok.Hint().Attr.Color.Add(color.FgRed)
 
 	return nil, &typ.Error{

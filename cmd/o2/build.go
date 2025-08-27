@@ -38,6 +38,7 @@ var build = &cobra.Command{
 		}
 
 		ast.Parse(p, ast.Format())
+		ast.Typeset(p)
 
 		return nil
 	},

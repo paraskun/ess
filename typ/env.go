@@ -10,9 +10,9 @@ const (
 	Abstract Segment = iota
 
 	Text
-	PDat
-	SDat
-	DDat
+	PackageData
+	StaticData
+	DynamicData
 )
 
 // Object is a unique typed program entity.
