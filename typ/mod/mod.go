@@ -129,6 +129,7 @@ func (m *Module) index(fsys fs.FS, name string, path string) error {
 		Mod: m,
 		Src: make([]*File, 0),
 		Nat: make([]*File, 0),
+		Sym: make(map[string]*typ.Object),
 	}
 
 	for _, ent := range entries {

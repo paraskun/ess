@@ -17,14 +17,14 @@ const (
 )
 
 type Visitor interface {
-	VisitStmt(Stmt)
-	VisitDecl(Decl)
-	VisitExpr(Expr)
+	VisitStmt(Stmt) *typ.Error
+	VisitDecl(Decl) *typ.Error
+	VisitExpr(Expr) *typ.Error
 }
 
 type Node interface {
 	Span() tty.Span
-	Accept(Visitor)
+	Accept(Visitor) *typ.Error
 }
 
 // Statements
@@ -102,7 +102,7 @@ type (
 	}
 
 	BasicExpr struct {
-		Tok *tty.Tok
+		Lex *lex.Lexeme
 
 		Obj *typ.Object
 	}
@@ -137,6 +137,7 @@ type (
 
 	InfExpr struct {
 		Box tty.Group
+		Lex *lex.Lexeme
 		X   Expr
 		Y   Expr
 
@@ -145,6 +146,7 @@ type (
 
 	PfxExpr struct {
 		Box tty.Group
+		Lex *lex.Lexeme
 		X   Expr
 
 		Res *typ.Object
@@ -207,7 +209,7 @@ type (
 	}
 
 	TypeSpec struct {
-		Tok *tty.Tok
+		Lex *lex.Lexeme
 		Typ *typ.Type
 	}
 
@@ -614,7 +616,7 @@ func (p *parser) parseFuncDecl() (*FuncDecl, *typ.Error) {
 	if tok.Typ == lex.LP {
 		p.nextIn(dec.Sig, 1, 0)
 
-		if _, err := p.parseTypeSpec(dec.Sig, 0, 0); err != nil {
+		if dec.Ret, err = p.parseTypeSpec(dec.Sig, 0, 0); err != nil {
 			err.Span = top
 			return nil, err
 		}
@@ -828,7 +830,7 @@ func (p *parser) parseTypeSpec(g tty.Group, r, b int) (*TypeSpec, *typ.Error) {
 
 	switch tok.Typ {
 	case lex.BOOL, lex.I64, lex.U64, lex.F64, lex.IDEN:
-		return &TypeSpec{Tok: tok.Tok}, nil
+		return &TypeSpec{Lex: tok}, nil
 	}
 
 	row, col := tok.Tok.Pos.Row, tok.Tok.Pos.Col
@@ -1559,7 +1561,7 @@ func (p *parser) parseExpr0() (Expr, *typ.Error) {
 		switch tok.Typ {
 		case lex.LAND, lex.LOR:
 			tok, _ := p.next()
-			res := &InfExpr{X: cur}
+			res := &InfExpr{Lex: tok, X: cur}
 
 			res.Y, err = p.parseExpr1()
 
@@ -1650,7 +1652,7 @@ func (p *parser) parseExpr1() (Expr, *typ.Error) {
 		switch tok.Typ {
 		case lex.LT, lex.GT, lex.LE, lex.GE, lex.NE, lex.EEQ:
 			tok, _ := p.next()
-			res := &InfExpr{X: cur}
+			res := &InfExpr{Lex: tok, X: cur}
 
 			res.Y, err = p.parseExpr2()
 
@@ -1742,7 +1744,7 @@ func (p *parser) parseExpr2() (Expr, *typ.Error) {
 		switch tok.Typ {
 		case lex.SHL, lex.SHR, lex.BAND, lex.BOR, lex.BXOR:
 			tok, _ := p.next()
-			res := &InfExpr{X: cur}
+			res := &InfExpr{Lex: tok, X: cur}
 
 			res.Y, err = p.parseExpr3()
 
@@ -1833,7 +1835,7 @@ func (p *parser) parseExpr3() (Expr, *typ.Error) {
 		switch tok.Typ {
 		case lex.ADD, lex.SUB:
 			tok, _ := p.next()
-			res := &InfExpr{X: cur}
+			res := &InfExpr{Lex: tok, X: cur}
 
 			res.Y, err = p.parseExpr4()
 
@@ -1924,7 +1926,7 @@ func (p *parser) parseExpr4() (Expr, *typ.Error) {
 		switch tok.Typ {
 		case lex.MUL, lex.DIV, lex.MOD, lex.POW:
 			tok, _ := p.next()
-			res := &InfExpr{X: cur}
+			res := &InfExpr{Lex: tok, X: cur}
 
 			res.Y, err = p.parseExpr5()
 
@@ -2002,7 +2004,7 @@ func (p *parser) parseExpr5() (Expr, *typ.Error) {
 	switch tok.Typ {
 	case lex.LNEG, lex.BNEG, lex.UNEG:
 		tok, _ := p.next()
-		res := &PfxExpr{}
+		res := &PfxExpr{Lex: tok}
 
 		res.X, err = p.parseExpr5()
 
@@ -2191,7 +2193,7 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 		return &IdenExpr{Tok: iden.Tok}, nil
 	case lex.II64, lex.IU64, lex.IF64, lex.TRUE, lex.FALSE:
 		tok, _ := p.next()
-		return &BasicExpr{Tok: tok.Tok}, nil
+		return &BasicExpr{Lex: tok}, nil
 	case lex.I64:
 		res := &ToI64Expr{}
 		top := &tty.Row{}
@@ -2454,14 +2456,14 @@ func (s *LoopStmt) Span() tty.Span   { return s.Box }
 func (s *CondStmt) Span() tty.Span   { return s.Box }
 func (s *CallStmt) Span() tty.Span   { return s.Box }
 
-func (s *ReturnStmt) Accept(v Visitor) { v.VisitStmt(s) }
-func (s *VarStmt) Accept(v Visitor)    { v.VisitStmt(s) }
-func (s *LetStmt) Accept(v Visitor)    { v.VisitStmt(s) }
-func (s *AssignStmt) Accept(v Visitor) { v.VisitStmt(s) }
-func (s *BlockStmt) Accept(v Visitor)  { v.VisitStmt(s) }
-func (s *LoopStmt) Accept(v Visitor)   { v.VisitStmt(s) }
-func (s *CondStmt) Accept(v Visitor)   { v.VisitStmt(s) }
-func (s *CallStmt) Accept(v Visitor)   { v.VisitStmt(s) }
+func (s *ReturnStmt) Accept(v Visitor) *typ.Error { return v.VisitStmt(s) }
+func (s *VarStmt) Accept(v Visitor) *typ.Error    { return v.VisitStmt(s) }
+func (s *LetStmt) Accept(v Visitor) *typ.Error    { return v.VisitStmt(s) }
+func (s *AssignStmt) Accept(v Visitor) *typ.Error { return v.VisitStmt(s) }
+func (s *BlockStmt) Accept(v Visitor) *typ.Error  { return v.VisitStmt(s) }
+func (s *LoopStmt) Accept(v Visitor) *typ.Error   { return v.VisitStmt(s) }
+func (s *CondStmt) Accept(v Visitor) *typ.Error   { return v.VisitStmt(s) }
+func (s *CallStmt) Accept(v Visitor) *typ.Error   { return v.VisitStmt(s) }
 
 func (*ReturnStmt) stmt() {}
 func (*VarStmt) stmt()    {}
@@ -2472,7 +2474,7 @@ func (*LoopStmt) stmt()   {}
 func (*CondStmt) stmt()   {}
 func (*CallStmt) stmt()   {}
 
-func (e *BasicExpr) Span() tty.Span  { return e.Tok }
+func (e *BasicExpr) Span() tty.Span  { return e.Lex.Tok }
 func (e *StructExpr) Span() tty.Span { return e.Box }
 func (e *IdenExpr) Span() tty.Span   { return e.Tok }
 func (e *DotExpr) Span() tty.Span    { return e.Box }
@@ -2484,17 +2486,17 @@ func (e *ToU64Expr) Span() tty.Span  { return e.Box }
 func (e *ToF64Expr) Span() tty.Span  { return e.Box }
 func (e *GroupExpr) Span() tty.Span  { return e.Box }
 
-func (e *BasicExpr) Accept(v Visitor)  { v.VisitExpr(e) }
-func (e *StructExpr) Accept(v Visitor) { v.VisitExpr(e) }
-func (e *IdenExpr) Accept(v Visitor)   { v.VisitExpr(e) }
-func (e *DotExpr) Accept(v Visitor)    { v.VisitExpr(e) }
-func (e *InfExpr) Accept(v Visitor)    { v.VisitExpr(e) }
-func (e *PfxExpr) Accept(v Visitor)    { v.VisitExpr(e) }
-func (e *CallExpr) Accept(v Visitor)   { v.VisitExpr(e) }
-func (e *ToI64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
-func (e *ToU64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
-func (e *ToF64Expr) Accept(v Visitor)  { v.VisitExpr(e) }
-func (e *GroupExpr) Accept(v Visitor)  { v.VisitExpr(e) }
+func (e *BasicExpr) Accept(v Visitor) *typ.Error  { return v.VisitExpr(e) }
+func (e *StructExpr) Accept(v Visitor) *typ.Error { return v.VisitExpr(e) }
+func (e *IdenExpr) Accept(v Visitor) *typ.Error   { return v.VisitExpr(e) }
+func (e *DotExpr) Accept(v Visitor) *typ.Error    { return v.VisitExpr(e) }
+func (e *InfExpr) Accept(v Visitor) *typ.Error    { return v.VisitExpr(e) }
+func (e *PfxExpr) Accept(v Visitor) *typ.Error    { return v.VisitExpr(e) }
+func (e *CallExpr) Accept(v Visitor) *typ.Error   { return v.VisitExpr(e) }
+func (e *ToI64Expr) Accept(v Visitor) *typ.Error  { return v.VisitExpr(e) }
+func (e *ToU64Expr) Accept(v Visitor) *typ.Error  { return v.VisitExpr(e) }
+func (e *ToF64Expr) Accept(v Visitor) *typ.Error  { return v.VisitExpr(e) }
+func (e *GroupExpr) Accept(v Visitor) *typ.Error  { return v.VisitExpr(e) }
 
 func (e *BasicExpr) Object() *typ.Object  { return e.Obj }
 func (e *StructExpr) Object() *typ.Object { return e.Obj }
@@ -2526,11 +2528,11 @@ func (d *FuncDecl) Span() tty.Span   { return d.Box }
 func (d *StructDecl) Span() tty.Span { return d.Box }
 func (d *EnumDecl) Span() tty.Span   { return d.Box }
 
-func (d *UseDecl) Accept(v Visitor)    { v.VisitDecl(d) }
-func (d *VarDecl) Accept(v Visitor)    { v.VisitDecl(d) }
-func (d *FuncDecl) Accept(v Visitor)   { v.VisitDecl(d) }
-func (d *StructDecl) Accept(v Visitor) { v.VisitDecl(d) }
-func (d *EnumDecl) Accept(v Visitor)   { v.VisitDecl(d) }
+func (d *UseDecl) Accept(v Visitor) *typ.Error    { return v.VisitDecl(d) }
+func (d *VarDecl) Accept(v Visitor) *typ.Error    { return v.VisitDecl(d) }
+func (d *FuncDecl) Accept(v Visitor) *typ.Error   { return v.VisitDecl(d) }
+func (d *StructDecl) Accept(v Visitor) *typ.Error { return v.VisitDecl(d) }
+func (d *EnumDecl) Accept(v Visitor) *typ.Error   { return v.VisitDecl(d) }
 
 func (*UseDecl) decl()    {}
 func (*VarDecl) decl()    {}

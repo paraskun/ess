@@ -35,6 +35,7 @@ type Hint struct {
 type Span interface {
 	Position() *Position
 	Hint() *Hint
+	Reset()
 
 	Draw(w io.Writer)
 	More() bool
@@ -72,6 +73,10 @@ func (t *Tok) Position() *Position {
 
 func (t *Tok) Hint() *Hint {
 	return &t.hint
+}
+
+func (t *Tok) Reset() {
+	t.ent = 0
 }
 
 func (t *Tok) Draw(w io.Writer) {
@@ -127,6 +132,14 @@ func (r *Row) Position() *Position {
 
 func (r *Row) Hint() *Hint {
 	return &r.hint
+}
+
+func (r *Row) Reset() {
+	r.ent = 0
+
+	for _, s := range r.Sub {
+		s.Reset()
+	}
 }
 
 func (r *Row) Add(s Span, ir, ib int) {
@@ -239,6 +252,18 @@ func (b *Box) Hint() *Hint {
 	return &b.hint
 }
 
+func (b *Box) Reset() {
+	b.cur = 0
+	b.ent = 0
+	b.que = nil
+	b.mon = false
+	b.ind = 0
+
+	for _, s := range b.Sub {
+		s.Reset()
+	}
+}
+
 func (b *Box) Add(s Span, ir, ib int) {
 	s.Position().Ind.Row = ir
 	s.Position().Ind.Box = ib
@@ -324,14 +349,24 @@ func (b *Box) Draw(w io.Writer) {
 		}
 
 		if b.que != nil && !b.mon {
-			b.que.Attr.Color.Fprintf(w, "┌")
+			b.que.Attr.Color.Fprintf(w, "┌ ")
 			b.que.size -= 1
 		}
 
-		b.Sub[b.ent].Draw(w)
 		b.cur = 2
 
-		if !b.Sub[b.ent].More() {
+		if b.Sub[b.ent].More() {
+			b.Sub[b.ent].Draw(w)
+
+			if !b.Sub[b.ent].More() {
+				if b.que != nil {
+					b.cur = 3
+				} else {
+					b.ent += 1
+					b.cur = 0
+				}
+			}
+		} else {
 			if b.que != nil {
 				b.cur = 3
 			} else {
@@ -342,14 +377,24 @@ func (b *Box) Draw(w io.Writer) {
 
 	case 1:
 		if b.que != nil && !b.mon {
-			b.que.Attr.Color.Fprintf(w, "┌")
+			b.que.Attr.Color.Fprintf(w, "┌ ")
 			b.que.size -= 1
 		}
 
-		b.Sub[b.ent].Draw(w)
 		b.cur = 2
 
-		if !b.Sub[b.ent].More() {
+		if b.Sub[b.ent].More() {
+			b.Sub[b.ent].Draw(w)
+
+			if !b.Sub[b.ent].More() {
+				if b.que != nil {
+					b.cur = 3
+				} else {
+					b.ent += 1
+					b.cur = 0
+				}
+			}
+		} else {
 			if b.que != nil {
 				b.cur = 3
 			} else {
@@ -360,13 +405,7 @@ func (b *Box) Draw(w io.Writer) {
 
 	case 2:
 		if b.que != nil {
-			if b.que.size == 1 {
-				b.que.Attr.Color.Fprintf(w, "├")
-			} else {
-				b.que.Attr.Color.Fprintf(w, "│")
-			}
-
-			b.que.size -= 1
+			b.que.Attr.Color.Fprintf(w, "│ ")
 		}
 
 		b.Sub[b.ent].Draw(w)
@@ -456,6 +495,11 @@ func (f *Frame) Position() *Position {
 	return nil
 }
 
+func (f *Frame) Reset() {
+	f.cur = 0
+	f.Span.Reset()
+}
+
 func (f *Frame) Draw(w io.Writer) {
 	f.Span.Position().Ind.Row = 2
 
@@ -471,10 +515,6 @@ func (f *Frame) Draw(w io.Writer) {
 			fmt.Fprintf(w, "│")
 			f.Span.Draw(w)
 			fmt.Fprintln(w)
-
-			if !f.Span.More() {
-				f.cur = 2
-			}
 		} else {
 			f.cur = 2
 		}

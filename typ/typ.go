@@ -48,7 +48,7 @@ type (
 		// FUNC 	-> *Func
 		// ENUM 	-> *Enum
 		// ARRAY 	-> *Array
-		// STRUCT -> *Struct
+		// STRUCT 	-> *Struct
 		Extra any
 	}
 
@@ -57,12 +57,12 @@ type (
 	Field struct {
 		Name string // name, maybe empty
 		Typ  *Type  // type
-		Idx  int    // index (for structs)
+		Off  int    // offset (for structs)
 	}
 
 	Func struct {
 		Arg []*Field
-		Ret []*Field
+		Ret *Field
 		Dec any // *ast.FuncDecl
 	}
 
@@ -118,10 +118,10 @@ func (t *Type) Equal(o *Type) bool {
 // Predefined data types
 
 var (
-	AnyType   = Type{Kind: ANY}
-	BoolType  = Type{Kind: BOOL}
-	Sig64Type = Type{Kind: I64}
-	Uns64Type = Type{Kind: U64}
-	Flt64Type = Type{Kind: F64}
-	StrType   = Type{Kind: STR}
+	AnyType  = Type{Kind: ANY}
+	I64Type  = Type{Kind: I64}
+	U64Type  = Type{Kind: U64}
+	F64Type  = Type{Kind: F64}
+	StrType  = Type{Kind: STR}
+	BoolType = Type{Kind: BOOL}
 )
