@@ -7,6 +7,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/paraskun/o2/tty"
 	"github.com/paraskun/o2/typ"
+	"github.com/paraskun/o2/typ/mod"
 )
 
 type Lexeme struct {
@@ -15,6 +16,8 @@ type Lexeme struct {
 }
 
 type Scanner struct {
+	Src *mod.File
+
 	buf []rune
 	row int
 	col int
@@ -194,9 +197,8 @@ func (s *Scanner) Next() (*Lexeme, *typ.Error) {
 		t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
 
 		return nil, &typ.Error{
-			Span: t.Tok,
 			Full: fmt.Sprintf("scanner: unknown symbol at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
-			Help: "verify your input or consider creating string literal",
+			Snip: []typ.Location{{File: s.Src, Span: t.Tok}},
 		}
 	}
 
@@ -241,11 +243,10 @@ func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, *typ.Error) {
 				s.col += cur
 
 				return nil, &typ.Error{
-					Span: t.Tok,
 					Full: fmt.Sprintf("scanner: malfomed floating point literal at %d:%d",
 						t.Tok.Pos.Row,
 						t.Tok.Pos.Col),
-					Help: "consider specifying at least one fraction digit",
+					Snip: []typ.Location{{File: s.Src, Span: t.Tok}},
 				}
 			}
 
@@ -269,11 +270,10 @@ func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, *typ.Error) {
 		s.buf = s.buf[cur:]
 
 		return nil, &typ.Error{
-			Span: t.Tok,
 			Full: fmt.Sprintf("scanner: malfomed numeric literal at %d:%d",
 				t.Tok.Pos.Row,
 				t.Tok.Pos.Col),
-			Help: "verify surrounding expression correctness",
+			Snip: []typ.Location{{File: s.Src, Span: t.Tok}},
 		}
 	}
 
@@ -320,9 +320,8 @@ func (s *Scanner) nextStr(t *Lexeme) (*Lexeme, *typ.Error) {
 			t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
 
 			return nil, &typ.Error{
-				Span: t.Tok,
 				Full: fmt.Sprintf("scanner: malfomed string literal at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
-				Help: "consider inlining the string",
+				Snip: []typ.Location{{File: s.Src, Span: t.Tok}},
 			}
 		}
 
@@ -343,9 +342,8 @@ func (s *Scanner) nextStr(t *Lexeme) (*Lexeme, *typ.Error) {
 		t.Tok.Hint().Attr.Color = *color.New(color.FgRed)
 
 		return nil, &typ.Error{
-			Span: t.Tok,
 			Full: fmt.Sprintf("scanner: malfomed string literal at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
-			Help: "consider finishing the string with a closing quote",
+			Snip: []typ.Location{{File: s.Src, Span: t.Tok}},
 		}
 
 	}

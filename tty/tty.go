@@ -9,7 +9,7 @@ import (
 	"github.com/fatih/color"
 )
 
-type Indent struct {
+type indent struct {
 	Row int
 	Box int
 }
@@ -17,7 +17,8 @@ type Indent struct {
 type Position struct {
 	Row int
 	Col int
-	Ind Indent
+
+	ind indent
 }
 
 type Attr struct {
@@ -36,21 +37,21 @@ type Span interface {
 	Position() *Position
 	Hint() *Hint
 	Reset()
+	Render()
 
-	Draw(w io.Writer)
-	More() bool
-	Size(i bool) (int, int)
-
+	draw(w io.Writer)
+	next() int
+	size(i bool) (int, int)
 	getHint() *Hint
 }
 
 type Group interface {
 	Span
 
+	Len() int
 	Add(s Span, ir, ib int)
-
-	InsertBeg(m Mono, ir int)
-	InsertEnd(m Mono, ir int)
+	Append(m Mono, i int)
+	Prepend(m Mono, i int)
 }
 
 type Mono interface {
@@ -63,8 +64,8 @@ type Tok struct {
 	Lit string
 	Pos Position
 
-	ent  int
-	hint Hint
+	drawn bool
+	hint  Hint
 }
 
 func (t *Tok) Position() *Position {
@@ -76,27 +77,36 @@ func (t *Tok) Hint() *Hint {
 }
 
 func (t *Tok) Reset() {
-	t.ent = 0
+	t.drawn = false
 }
 
-func (t *Tok) Draw(w io.Writer) {
-	fmt.Fprintf(w, "%s", strings.Repeat(" ", t.Pos.Ind.Row))
+func (t *Tok) Render() {
+	t.Pos.Row = t.Pos.ind.Box
+	t.Pos.Col = t.Pos.ind.Row
+}
+
+func (t *Tok) draw(w io.Writer) {
+	fmt.Fprintf(w, "%s", strings.Repeat(" ", t.Pos.ind.Row))
 	fmt.Fprintf(w, "%s", t.Lit)
 
-	t.ent = 1
+	t.drawn = true
 }
 
-func (t *Tok) More() bool {
-	return t.ent == 0
+func (t *Tok) next() int {
+	if t.drawn {
+		return -1
+	}
+
+	return t.Pos.Row
 }
 
-func (t *Tok) Size(i bool) (int, int) {
+func (t *Tok) size(i bool) (int, int) {
 	w := utf8.RuneCountInString(t.Lit)
 	h := 1
 
 	if i {
-		w += t.Pos.Ind.Row
-		h += t.Pos.Ind.Box
+		w += t.Pos.ind.Row
+		h += t.Pos.ind.Box
 	}
 
 	return w, h
@@ -106,8 +116,8 @@ func (t *Tok) getHint() *Hint {
 	h := &t.hint
 
 	if h.Text != "" {
-		h.size, _ = t.Size(false)
-		h.offset = t.Pos.Ind.Row
+		h.size, _ = t.size(false)
+		h.offset = t.Pos.ind.Row
 
 		return h
 	}
@@ -119,11 +129,21 @@ func (*Tok) mono() {}
 
 type Row struct {
 	Pos Position
-	Sub []Mono
 
-	ent  int
-	hint Hint
-	size int
+	sub   []Mono
+	width int
+	hint  Hint
+	drawn bool
+}
+
+func RowOf(sub ...Mono) *Row {
+	row := &Row{}
+
+	for _, s := range sub {
+		row.Add(s, 0, 0)
+	}
+
+	return row
 }
 
 func (r *Row) Position() *Position {
@@ -135,74 +155,102 @@ func (r *Row) Hint() *Hint {
 }
 
 func (r *Row) Reset() {
-	r.ent = 0
+	r.drawn = false
 
-	for _, s := range r.Sub {
+	for _, s := range r.sub {
 		s.Reset()
 	}
 }
 
+func (r *Row) Render() {
+	r.Pos.Row += r.Pos.ind.Box
+	r.Pos.Col += r.Pos.ind.Row
+
+	off := r.Pos.Col
+
+	for _, s := range r.sub {
+		s.Position().Row = r.Pos.Row
+		s.Position().Col = off
+		s.Render()
+
+		sw, _ := s.size(true)
+		off += sw
+	}
+}
+
+func (r *Row) Len() int {
+	return len(r.sub)
+}
+
 func (r *Row) Add(s Span, ir, ib int) {
-	s.Position().Ind.Row = ir
-	s.Position().Ind.Box = 0
-
-	r.Sub = append(r.Sub, s.(Mono))
-	sw, _ := s.Size(true)
-	r.size += sw
-}
-
-func (r *Row) InsertBeg(m Mono, ir int) {
-	m.Position().Ind.Row = ir
-	m.Position().Ind.Box = 0
-
-	sub := make([]Mono, 0, len(r.Sub)+1)
-	sub = append(sub, m)
-	sub = append(sub, r.Sub...)
-
-	r.Sub = sub
-	sw, _ := m.Size(true)
-	r.size += sw
-}
-
-func (r *Row) InsertEnd(m Mono, ir int) {
-	m.Position().Ind.Row = ir
-	m.Position().Ind.Box = 0
-
-	r.Sub = append(r.Sub, m)
-	sw, _ := m.Size(true)
-	r.size += sw
-}
-
-func (r *Row) Draw(w io.Writer) {
-	fmt.Fprintf(w, "%s", strings.Repeat(" ", r.Pos.Ind.Row))
-
-	for _, s := range r.Sub {
-		s.Draw(w)
+	if len(r.sub) == 0 {
+		r.Pos.Row = s.Position().Row
 	}
 
-	r.ent = len(r.Sub)
+	s.Position().ind.Row = ir
+	s.Position().ind.Box = 0
+
+	r.sub = append(r.sub, s.(Mono))
+	sw, _ := s.size(true)
+	r.width += sw
 }
 
-func (r *Row) More() bool {
-	return r.ent < len(r.Sub)
+func (r *Row) Append(m Mono, ir int) {
+	m.Position().ind.Row = ir
+	m.Position().ind.Box = 0
+
+	r.sub = append(r.sub, m)
+	sw, _ := m.size(true)
+	r.width += sw
 }
 
-func (r *Row) Size(i bool) (int, int) {
-	w := r.size
+func (r *Row) Prepend(m Mono, ir int) {
+	m.Position().ind.Row = ir
+	m.Position().ind.Box = 0
+
+	sub := make([]Mono, 0, len(r.sub)+1)
+	sub = append(sub, m)
+	sub = append(sub, r.sub...)
+
+	r.sub = sub
+	sw, _ := m.size(true)
+	r.width += sw
+}
+
+func (r *Row) draw(w io.Writer) {
+	fmt.Fprintf(w, "%s", strings.Repeat(" ", r.Pos.ind.Row))
+
+	for _, s := range r.sub {
+		s.draw(w)
+	}
+
+	r.drawn = true
+}
+
+func (r *Row) next() int {
+	if r.drawn {
+		return -1
+	}
+
+	return r.Pos.Row
+}
+
+func (r *Row) size(i bool) (int, int) {
+	w := r.width
 	h := 1
 
 	if i {
-		w += r.Pos.Ind.Row
-		h += r.Pos.Ind.Box
+		w += r.Pos.ind.Row
+		h += r.Pos.ind.Box
 	}
 
 	return w, h
 }
 
 func (r *Row) getHint() *Hint {
-	off := r.Pos.Ind.Row
+	off := r.Pos.ind.Row
 
-	for _, s := range r.Sub {
+	for _, s := range r.sub {
 		h := s.getHint()
 
 		if h != nil {
@@ -210,15 +258,15 @@ func (r *Row) getHint() *Hint {
 			return h
 		}
 
-		ssz, _ := s.Size(true)
+		ssz, _ := s.size(true)
 		off += ssz
 	}
 
 	h := &r.hint
 
 	if h.Text != "" {
-		h.size = r.size
-		h.offset = r.Pos.Ind.Row
+		h.size = r.width
+		h.offset = r.Pos.ind.Row
 
 		return h
 	}
@@ -231,17 +279,26 @@ func (*Row) mono() {}
 type Box struct {
 	Ctl bool
 	Pos Position
-	Sub []Span
 
-	hint   Hint
-	width  int
-	height int
+	sub     []Span
+	hint    Hint
+	width   int
+	height  int
+	state   int
+	entry   int
+	indent  int
+	mono    bool
+	pending *Hint
+}
 
-	cur int
-	ent int
-	ind int
-	mon bool
-	que *Hint
+func BoxOf(sub ...Span) *Box {
+	box := &Box{}
+
+	for _, s := range sub {
+		box.Add(s, 0, 0)
+	}
+
+	return box
 }
 
 func (b *Box) Position() *Position {
@@ -253,78 +310,91 @@ func (b *Box) Hint() *Hint {
 }
 
 func (b *Box) Reset() {
-	b.cur = 0
-	b.ent = 0
-	b.que = nil
-	b.mon = false
-	b.ind = 0
+	b.state = 0
+	b.entry = 0
+	b.pending = nil
+	b.mono = false
+	b.indent = 0
 
-	for _, s := range b.Sub {
+	for _, s := range b.sub {
 		s.Reset()
 	}
 }
 
+func (b *Box) Render() {
+	b.Pos.Row += b.Pos.ind.Box
+	b.Pos.Col += b.Pos.ind.Row
+
+	off := b.Pos.Row
+
+	for _, s := range b.sub {
+		s.Position().Row = off
+		s.Position().Col = b.Pos.Col
+		s.Render()
+
+		_, sh := s.size(true)
+		off += sh
+	}
+}
+
+func (b *Box) Len() int {
+	return len(b.sub)
+}
+
 func (b *Box) Add(s Span, ir, ib int) {
-	s.Position().Ind.Row = ir
-	s.Position().Ind.Box = ib
+	s.Position().ind.Row = ir
+	s.Position().ind.Box = ib
 
-	b.Sub = append(b.Sub, s)
-
-	_, sh := s.Size(true)
+	b.sub = append(b.sub, s)
+	_, sh := s.size(true)
 	b.height += sh
 }
 
-func (b *Box) InsertBeg(m Mono, ir int) {
-	if len(b.Sub) == 0 {
+func (b *Box) Append(m Mono, ir int) {
+	if len(b.sub) == 0 {
 		b.Add(m, ir, 0)
 		return
 	}
 
-	f := b.Sub[0]
-
-	switch fb := f.(type) {
-	case *Box:
-		fb.InsertBeg(m, ir)
-	default:
-		row := &Row{Pos: Position{Ind: Indent{
-			Row: f.Position().Ind.Row,
-			Box: f.Position().Ind.Box,
-		}}}
-
-		row.Add(m, 0, 0)
-		row.Add(f, ir, 0)
-
-		b.Sub[0] = row
-	}
-}
-
-func (b *Box) InsertEnd(m Mono, ir int) {
-	if len(b.Sub) == 0 {
-		b.Add(m, ir, 0)
-		return
-	}
-
-	l := b.Sub[len(b.Sub)-1]
+	l := b.sub[len(b.sub)-1]
 
 	switch lb := l.(type) {
 	case *Box:
-		lb.InsertEnd(m, ir)
+		lb.Append(m, ir)
 	default:
-		row := &Row{Pos: Position{Ind: Indent{
-			Row: l.Position().Ind.Row,
-			Box: l.Position().Ind.Box,
-		}}}
+		row := &Row{Pos: Position{ind: l.Position().ind}}
 
 		row.Add(l, 0, 0)
 		row.Add(m, ir, 0)
 
-		b.Sub[len(b.Sub)-1] = row
+		b.sub[len(b.sub)-1] = row
 	}
 }
 
-func (b *Box) Draw(w io.Writer) {
-	if b.ind != 0 {
-		b.ind -= 1
+func (b *Box) Prepend(m Mono, ir int) {
+	if len(b.sub) == 0 {
+		b.Add(m, ir, 0)
+		return
+	}
+
+	f := b.sub[0]
+
+	switch fb := f.(type) {
+	case *Box:
+		fb.Prepend(m, ir)
+	default:
+		row := &Row{Pos: Position{ind: f.Position().ind}}
+
+		row.Add(m, 0, 0)
+		row.Add(f, ir, 0)
+
+		b.sub[0] = row
+	}
+}
+
+func (b *Box) draw(w io.Writer) {
+	if b.indent != 0 {
+		b.indent -= 1
 
 		if b.Ctl {
 			fmt.Fprintln(w)
@@ -333,117 +403,117 @@ func (b *Box) Draw(w io.Writer) {
 		return
 	}
 
-	fmt.Fprintf(w, "%s", strings.Repeat(" ", b.Pos.Ind.Row))
+	fmt.Fprintf(w, "%s", strings.Repeat(" ", b.Pos.ind.Row))
 
-	switch b.cur {
+	switch b.state {
 	case 0:
-		b.ind = b.Sub[b.ent].Position().Ind.Box
-		b.que = b.Sub[b.ent].getHint()
-		_, b.mon = b.Sub[b.ent].(Mono)
+		b.indent = b.sub[b.entry].Position().ind.Box
+		b.pending = b.sub[b.entry].getHint()
+		_, b.mono = b.sub[b.entry].(Mono)
 
-		if b.ind != 0 {
-			b.ind -= 1
-			b.cur = 1
+		if b.indent != 0 {
+			b.indent -= 1
+			b.state = 1
 
 			break
 		}
 
-		if b.que != nil && !b.mon {
-			b.que.Attr.Color.Fprintf(w, "┌ ")
-			b.que.size -= 1
+		if b.pending != nil && !b.mono {
+			b.pending.Attr.Color.Fprintf(w, "┌ ")
+			b.pending.size -= 1
 		}
 
-		b.cur = 2
+		b.state = 2
 
-		if b.Sub[b.ent].More() {
-			b.Sub[b.ent].Draw(w)
+		if b.sub[b.entry].next() != -1 {
+			b.sub[b.entry].draw(w)
 
-			if !b.Sub[b.ent].More() {
-				if b.que != nil {
-					b.cur = 3
+			if b.sub[b.entry].next() == -1 {
+				if b.pending != nil {
+					b.state = 3
 				} else {
-					b.ent += 1
-					b.cur = 0
+					b.entry += 1
+					b.state = 0
 				}
 			}
 		} else {
-			if b.que != nil {
-				b.cur = 3
+			if b.pending != nil {
+				b.state = 3
 			} else {
-				b.ent += 1
-				b.cur = 0
+				b.entry += 1
+				b.state = 0
 			}
 		}
 
 	case 1:
-		if b.que != nil && !b.mon {
-			b.que.Attr.Color.Fprintf(w, "┌ ")
-			b.que.size -= 1
+		if b.pending != nil && !b.mono {
+			b.pending.Attr.Color.Fprintf(w, "┌ ")
+			b.pending.size -= 1
 		}
 
-		b.cur = 2
+		b.state = 2
 
-		if b.Sub[b.ent].More() {
-			b.Sub[b.ent].Draw(w)
+		if b.sub[b.entry].next() != -1 {
+			b.sub[b.entry].draw(w)
 
-			if !b.Sub[b.ent].More() {
-				if b.que != nil {
-					b.cur = 3
+			if b.sub[b.entry].next() == -1 {
+				if b.pending != nil {
+					b.state = 3
 				} else {
-					b.ent += 1
-					b.cur = 0
+					b.entry += 1
+					b.state = 0
 				}
 			}
 		} else {
-			if b.que != nil {
-				b.cur = 3
+			if b.pending != nil {
+				b.state = 3
 			} else {
-				b.ent += 1
-				b.cur = 0
+				b.entry += 1
+				b.state = 0
 			}
 		}
 
 	case 2:
-		if b.que != nil {
-			b.que.Attr.Color.Fprintf(w, "│ ")
+		if b.pending != nil {
+			b.pending.Attr.Color.Fprintf(w, "│ ")
 		}
 
-		b.Sub[b.ent].Draw(w)
+		b.sub[b.entry].draw(w)
 
-		if !b.Sub[b.ent].More() {
-			if b.que != nil {
-				b.cur = 3
+		if b.sub[b.entry].next() == -1 {
+			if b.pending != nil {
+				b.state = 3
 			} else {
-				b.ent += 1
-				b.cur = 0
+				b.entry += 1
+				b.state = 0
 			}
 		}
 
 	case 3:
-		switch b.Sub[b.ent].(type) {
+		switch b.sub[b.entry].(type) {
 		case Mono:
-			b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.que.offset))
-			b.que.Attr.Color.Fprintf(w, "%s┬", strings.Repeat("─", b.que.size/2))
+			b.pending.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.pending.offset))
+			b.pending.Attr.Color.Fprintf(w, "%s┬", strings.Repeat("─", b.pending.size/2))
 
-			if b.que.size%2 == 0 {
-				b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat("─", b.que.size/2-1))
+			if b.pending.size%2 == 0 {
+				b.pending.Attr.Color.Fprintf(w, "%s", strings.Repeat("─", b.pending.size/2-1))
 			} else {
-				b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat("─", b.que.size/2))
+				b.pending.Attr.Color.Fprintf(w, "%s", strings.Repeat("─", b.pending.size/2))
 			}
 
-			b.cur = 4
+			b.state = 4
 
 		default:
-			b.que.Attr.Color.Fprintf(w, "└──── %s", b.que.Text)
-			b.ent += 1
-			b.cur = 0
+			b.pending.Attr.Color.Fprintf(w, "└──── %s", b.pending.Text)
+			b.entry += 1
+			b.state = 0
 		}
 
 	case 4:
-		b.que.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.que.offset+b.que.size/2))
-		b.que.Attr.Color.Fprintf(w, "╰─ %s", b.que.Text)
-		b.ent += 1
-		b.cur = 0
+		b.pending.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.pending.offset+b.pending.size/2))
+		b.pending.Attr.Color.Fprintf(w, "╰─ %s", b.pending.Text)
+		b.entry += 1
+		b.state = 0
 	}
 
 	if b.Ctl {
@@ -451,17 +521,27 @@ func (b *Box) Draw(w io.Writer) {
 	}
 }
 
-func (b *Box) More() bool {
-	return b.ent < len(b.Sub)
+func (b *Box) next() int {
+	if b.entry < len(b.sub) {
+		row := b.sub[b.entry].next()
+
+		if row == -1 {
+			return 0
+		}
+
+		return row
+	}
+
+	return -1
 }
 
-func (b *Box) Size(i bool) (int, int) {
+func (b *Box) size(i bool) (int, int) {
 	w := b.width
 	h := b.height
 
 	if i {
-		w += b.Pos.Ind.Row
-		h += b.Pos.Ind.Box
+		w += b.Pos.ind.Row
+		h += b.Pos.ind.Box
 	}
 
 	return w, h
@@ -472,7 +552,7 @@ func (b *Box) getHint() *Hint {
 
 	if h.Text != "" {
 		h.size = b.height
-		h.offset = b.Pos.Ind.Box
+		h.offset = b.Pos.ind.Box
 
 		return h
 	}
@@ -483,8 +563,9 @@ func (b *Box) getHint() *Hint {
 type Frame struct {
 	Name string
 	Span Span
+	Line bool
 
-	cur int
+	state int
 }
 
 func (f *Frame) Hint() *Hint {
@@ -496,40 +577,55 @@ func (f *Frame) Position() *Position {
 }
 
 func (f *Frame) Reset() {
-	f.cur = 0
+	f.state = 0
 	f.Span.Reset()
 }
 
-func (f *Frame) Draw(w io.Writer) {
-	f.Span.Position().Ind.Row = 2
+func (f *Frame) Render() {
+	f.Span.Position().Row = 0
+	f.Span.Position().Col = 0
+	f.Span.Render()
+}
 
-	switch f.cur {
+func (f *Frame) draw(w io.Writer) {
+	f.Span.Position().ind.Row = 2
+
+	switch f.state {
 	case 0:
-		fmt.Fprintf(w, "╭─[ ")
+		fmt.Fprintf(w, "   ╭─[ ")
 		color.New(color.FgBlue).Fprintf(w, "%s", f.Name)
 		fmt.Fprintf(w, " ]\n")
-		f.cur = 1
+		f.state = 1
 
 	case 1:
-		if f.Span.More() {
-			fmt.Fprintf(w, "│")
-			f.Span.Draw(w)
+		if row := f.Span.next(); row != -1 {
+			if row == 0 {
+				fmt.Fprintf(w, "   │")
+			} else {
+				fmt.Fprintf(w, "%2d │", row)
+			}
+
+			f.Span.draw(w)
 			fmt.Fprintln(w)
 		} else {
-			f.cur = 2
+			f.state = 2
 		}
 
 	case 2:
-		fmt.Fprintf(w, "╰────\n")
-		f.cur = 3
+		fmt.Fprintf(w, "   ╰────\n")
+		f.state = 3
 	}
 }
 
-func (f *Frame) More() bool {
-	return f.cur < 3
+func (f *Frame) next() int {
+	if f.state < 3 {
+		return 0
+	}
+
+	return -1
 }
 
-func (*Frame) Size(_ bool) (int, int) {
+func (*Frame) size(_ bool) (int, int) {
 	return 0, 0
 }
 
@@ -538,7 +634,7 @@ func (*Frame) getHint() *Hint {
 }
 
 func Print(w io.Writer, s Span) {
-	for s.More() {
-		s.Draw(w)
+	for s.next() != -1 {
+		s.draw(w)
 	}
 }

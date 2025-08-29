@@ -8,8 +8,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/paraskun/o2/typ"
-
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -129,7 +127,6 @@ func (m *Module) index(fsys fs.FS, name string, path string) error {
 		Mod: m,
 		Src: make([]*File, 0),
 		Nat: make([]*File, 0),
-		Sym: make(map[string]*typ.Object),
 	}
 
 	for _, ent := range entries {
@@ -205,8 +202,7 @@ type Package struct {
 
 	// Typing pass
 
-	Env *typ.Env
-	Sym map[string]*typ.Object
+	Env any // *typ.Env
 }
 
 func (p *Package) Index() error {
@@ -221,6 +217,6 @@ type File struct {
 
 	// Typing pass
 
-	Dec any      // *ast.File, import cycle otherwise
-	Env *typ.Env // Pkg.Env
+	Env any // *typ.Env
+	Dec any // *ast.File, import cycle otherwise
 }

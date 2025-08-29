@@ -17,125 +17,101 @@ type typer struct {
 	src *mod.File
 	env *typ.Env
 	fun *typ.Func
+	ctx tty.Span
 }
 
 func Typeset(pkg *mod.Package) {
-	pkg.Env = typ.New(nil)
-	ty := typer{pkg: pkg, env: pkg.Env}
+	pkg.Env = typ.NewEnv(nil)
+	ty := typer{pkg: pkg, env: pkg.Env.(*typ.Env)}
 
 	for _, src := range pkg.Src {
 		ty.src = src
 		src.Env = pkg.Env
 
 		for _, dec := range src.Dec.(*File).Dec {
-			if err := dec.Accept(&ty); err != nil {
-				ty.note(err)
-				return
-			}
+			ty.ctx = src.Dec.(*File).Box
+			dec.Accept(&ty)
 		}
 	}
 }
 
-func (t *typer) note(err *typ.Error) {
-	err.Span.Reset()
-	err.Span.Position().Ind.Box = 0
-
-	fmt.Printf("o2: %v\n\n", err.Full)
-	tty.Print(os.Stdout, &tty.Frame{
-		Name: t.src.Name,
-		Span: &tty.Box{
-			Sub: []tty.Span{err.Span},
-		},
-	})
-	fmt.Printf("\nhint: %s\n", err.Help)
-}
-
-func (t *typer) VisitDecl(u Decl) *typ.Error {
+func (t *typer) VisitDecl(u Decl) {
 	switch d := u.(type) {
 	case *UseDecl:
-		return t.visitUseDecl(d)
+		t.visitUseDecl(d)
 	case *VarDecl:
-		return t.visitVarDecl(d)
+		t.visitVarDecl(d)
 	case *FuncDecl:
-		return t.visitFuncDecl(d)
+		t.visitFuncDecl(d)
 	case *StructDecl:
-		return t.visitStructDecl(d)
+		t.visitStructDecl(d)
 	case *EnumDecl:
-		return t.visitEnumDecl(d)
+		t.visitEnumDecl(d)
 	}
-
-	return nil
 }
 
-func (t *typer) visitUseDecl(d *UseDecl) *typ.Error {
+func (t *typer) visitUseDecl(d *UseDecl) {
 	// Ignore an error, if multiple files using same package.
-	_ = t.env.Insert(d.Pkg.Lit[0:len(d.Pkg.Lit)-1], d.Obj)
+	_, _ = t.env.Insert(d.Pkg.Lit[0:len(d.Pkg.Lit)-1], d.Obj)
 
 	Typeset(d.Obj.Typ.Extra.(*mod.Package))
-
-	return nil
 }
 
 func (t *typer) visitVarDecl(d *VarDecl) *typ.Error {
 	d.Ini.Accept(t)
 
-	if err := t.env.Insert(d.Var.Lit, &typ.Object{
+	if _, ok := t.env.Insert(d.Var.Lit, &typ.Object{
+		Loc: typ.Location{File: t.src, Span: d.Box},
 		Typ: d.Ini.Object().Typ,
 		Val: d.Ini.Object().Val,
-	}); err != nil {
-		panic(err)
+	}); !ok {
+		panic("already defined")
 	}
 
 	return nil
 }
 
-func (t *typer) visitFuncDecl(d *FuncDecl) *typ.Error {
-	d.Env = typ.New(t.env)
-	d.Obj = &typ.Object{}
-
-	ty, err := t.visitFuncSpec(d)
-
-	if err != nil {
-		err.Span = d.Box
-		return err
+func (t *typer) visitFuncDecl(d *FuncDecl) {
+	t.ctx = d.Box
+	d.Env = typ.NewEnv(t.env)
+	d.Obj = &typ.Object{
+		Loc: typ.Location{File: t.src, Span: d.Box},
+		Typ: t.visitFuncSpec(d),
 	}
 
-	d.Obj.Typ = ty
+	if prv, ok := t.env.Insert(d.Sym.Lit, d.Obj); !ok {
+		err := &typ.Error{
+			Full: fmt.Sprintf("the name \"%s\" is defined multiple times", d.Sym.Lit),
+			Snip: []typ.Location{
+				prv.Loc,
+				{File: t.src, Span: t.ctx},
+			},
+		}
 
-	if err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
-		d.Box.Hint().Text = "this function is already defined"
+		prv.Loc.Span.Hint().Text = "previous definiton here"
+		prv.Loc.Span.Hint().Attr.Color.Add(color.FgCyan)
+
+		d.Box.Hint().Text = "redefined here"
 		d.Box.Hint().Attr.Color.Add(color.FgRed)
 
-		return &typ.Error{
-			Span: d.Box,
-			Full: "duplicated function definition",
-			Help: "god help you",
-		}
+		err.Note(os.Stdout)
 	}
 
 	t.env = d.Env
 	t.fun = d.Obj.Typ.Extra.(*typ.Func)
 
-	if err := d.Sub.Accept(t); err != nil {
-		err.Span = d.Box
-		return err
-	}
+	d.Sub.Accept(t)
 
 	t.fun = nil
 	t.env = d.Env.Parent
-
-	return nil
 }
 
-func (t *typer) visitFuncSpec(d *FuncDecl) (*typ.Type, *typ.Error) {
+func (t *typer) visitFuncSpec(d *FuncDecl) *typ.Type {
 	e := &typ.Func{Dec: d}
 	r := &typ.Type{Kind: typ.FUNC, Extra: e}
 
 	for _, arg := range d.Arg {
-		if err := t.visitTypeSpec(arg.Typ); err != nil {
-			err.Span = d.Box
-			return nil, err
-		}
+		t.visitTypeSpec(arg.Typ)
 
 		if arg.Typ.Typ.Kind == typ.STRUCT {
 			arg.Typ.Typ = &typ.Type{
@@ -145,18 +121,13 @@ func (t *typer) visitFuncSpec(d *FuncDecl) (*typ.Type, *typ.Error) {
 		}
 
 		obj := &typ.Object{
+			Loc: typ.Location{File: t.src, Span: arg.Box},
 			Typ: arg.Typ.Typ,
 		}
 
-		if err := d.Env.Insert(arg.Sym.Lit, obj); err != nil {
+		if _, ok := d.Env.Insert(arg.Sym.Lit, obj); !ok {
 			arg.Box.Hint().Text = "this argument is already declared"
 			arg.Box.Hint().Attr.Color.Add(color.FgRed)
-
-			return nil, &typ.Error{
-				Span: d.Box,
-				Full: "duplicated function argument",
-				Help: "god help you",
-			}
 		}
 
 		e.Arg = append(e.Arg, &typ.Field{
@@ -166,20 +137,17 @@ func (t *typer) visitFuncSpec(d *FuncDecl) (*typ.Type, *typ.Error) {
 	}
 
 	if d.Ret != nil {
-		if err := t.visitTypeSpec(d.Ret); err != nil {
-			err.Span = d.Box
-			return nil, err
-		}
+		t.visitTypeSpec(d.Ret)
 
 		e.Ret = &typ.Field{
 			Typ: d.Ret.Typ,
 		}
 	}
 
-	return r, nil
+	return r
 }
 
-func (t *typer) visitTypeSpec(s *TypeSpec) *typ.Error {
+func (t *typer) visitTypeSpec(s *TypeSpec) {
 	switch s.Lex.Typ {
 	case lex.BOOL:
 		s.Typ = &typ.BoolType
@@ -193,77 +161,52 @@ func (t *typer) visitTypeSpec(s *TypeSpec) *typ.Error {
 		sym, _ := t.env.Lookup(s.Lex.Tok.Lit)
 
 		if sym == nil {
-			s.Lex.Tok.Hint().Text = "undeclared type here"
+			err := &typ.Error{
+				Full: fmt.Sprintf("there is no type \"%s\" in this scope", s.Lex.Tok.Lit),
+				Snip: []typ.Location{{File: t.src, Span: t.ctx}},
+			}
+
+			s.Lex.Tok.Hint().Text = "unknown type here"
 			s.Lex.Tok.Hint().Attr.Color.Add(color.FgRed)
 
-			return &typ.Error{
-				Span: s.Lex.Tok,
-				Full: "specified undeclared type",
-				Help: "god help you",
-			}
+			err.Note(os.Stdout)
+
+			return
 		}
 
 		if sym.Typ.Kind != typ.ENUM && sym.Typ.Kind != typ.STRUCT {
 			s.Lex.Tok.Hint().Text = "type specification expected here"
 			s.Lex.Tok.Hint().Attr.Color.Add(color.FgRed)
 
-			return &typ.Error{
-				Span: s.Lex.Tok,
-				Full: "type specification expected",
-				Help: "god help you",
-			}
+			return
 		}
 
 		s.Typ = sym.Typ
 	}
-
-	return nil
 }
 
-func (t *typer) visitStructDecl(d *StructDecl) *typ.Error {
-	ty, err := t.visitStructSpec(d)
-
-	if err != nil {
-		err.Span = d.Box
-		return err
+func (t *typer) visitStructDecl(d *StructDecl) {
+	d.Obj = &typ.Object{
+		Loc: typ.Location{File: t.src, Span: d.Box},
+		Typ: t.visitStructSpec(d),
 	}
 
-	d.Obj = &typ.Object{Typ: ty}
-
-	if err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
+	if _, ok := t.env.Insert(d.Sym.Lit, d.Obj); !ok {
 		d.Box.Hint().Text = "this structure is already defined"
 		d.Box.Hint().Attr.Color.Add(color.FgRed)
-
-		return &typ.Error{
-			Span: d.Box,
-			Full: "duplicated structure definition",
-			Help: "god help you",
-		}
 	}
-
-	return nil
 }
 
-func (t *typer) visitStructSpec(d *StructDecl) (*typ.Type, *typ.Error) {
+func (t *typer) visitStructSpec(d *StructDecl) *typ.Type {
 	e := &typ.Struct{Mem: make(map[string]*typ.Field), Dec: d}
 	r := &typ.Type{Kind: typ.STRUCT, Extra: e}
 
 	for _, mem := range d.Mem {
-		if err := t.visitTypeSpec(mem.Typ); err != nil {
-			err.Span = d.Box
-			return nil, err
-		}
+		t.visitTypeSpec(mem.Typ)
 
 		if _, ok := e.Mem[mem.Sym.Lit]; ok {
 			mem.Box.Hint().Text = "this field is already defined"
 			mem.Box.Hint().Attr.Color.Add(color.FgRed)
-
-			return nil, &typ.Error{
-				Span: d.Box,
-				Full: "duplicated structure member",
-				Help: "god help you",
-			}
-
 		}
 
 		e.Mem[mem.Sym.Lit] = &typ.Field{
@@ -272,33 +215,22 @@ func (t *typer) visitStructSpec(d *StructDecl) (*typ.Type, *typ.Error) {
 		}
 	}
 
-	return r, nil
+	return r
 }
 
-func (t *typer) visitEnumDecl(d *EnumDecl) *typ.Error {
-	ty, err := t.visitEnumSpec(d)
-
-	if err != nil {
-		return err
+func (t *typer) visitEnumDecl(d *EnumDecl) {
+	d.Obj = &typ.Object{
+		Loc: typ.Location{File: t.src, Span: d.Box},
+		Typ: t.visitEnumSpec(d),
 	}
 
-	d.Obj = &typ.Object{Typ: ty}
-
-	if err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
+	if _, ok := t.env.Insert(d.Sym.Lit, d.Obj); !ok {
 		d.Box.Hint().Text = "this enum is already defined"
 		d.Box.Hint().Attr.Color.Add(color.FgRed)
-
-		return &typ.Error{
-			Span: d.Box,
-			Full: "duplicated enum definition",
-			Help: "god help you",
-		}
 	}
-
-	return nil
 }
 
-func (t *typer) visitEnumSpec(d *EnumDecl) (*typ.Type, *typ.Error) {
+func (t *typer) visitEnumSpec(d *EnumDecl) *typ.Type {
 	e := &typ.Enum{Mem: make(map[string]uint8), Dec: d}
 	r := &typ.Type{Kind: typ.ENUM, Extra: e}
 
@@ -306,38 +238,30 @@ func (t *typer) visitEnumSpec(d *EnumDecl) (*typ.Type, *typ.Error) {
 		if _, ok := e.Mem[mem.Lit]; ok {
 			mem.Hint().Text = "this member is already declared"
 			mem.Hint().Attr.Color.Add(color.FgRed)
-
-			return nil, &typ.Error{
-				Span: d.Box,
-				Full: "duplicated enum member",
-				Help: "god help you",
-			}
 		}
 
 		e.Mem[mem.Lit] = uint8(idx)
 	}
 
-	return r, nil
+	return r
 }
 
-func (t *typer) VisitStmt(u Stmt) *typ.Error {
+func (t *typer) VisitStmt(u Stmt) {
 	switch s := u.(type) {
 	case *ReturnStmt:
-		return t.visitReturnStmt(s)
+		t.visitReturnStmt(s)
 	case *VarStmt:
-		return t.visitVarStmt(s)
+		t.visitVarStmt(s)
 	case *LetStmt:
-		return t.visitLetStmt(s)
+		t.visitLetStmt(s)
 	case *AssignStmt:
-		return t.visitAssignStmt(s)
+		t.visitAssignStmt(s)
 	case *BlockStmt:
-		s.Env = typ.New(t.env)
+		s.Env = typ.NewEnv(t.env)
 		t.env = s.Env
 
 		for _, o := range s.Sub {
-			if err := o.Accept(t); err != nil {
-				return err
-			}
+			o.Accept(t)
 		}
 
 		t.env = s.Env.Parent
@@ -358,20 +282,12 @@ func (t *typer) VisitStmt(u Stmt) *typ.Error {
 			panic("missed return")
 		}
 	}
-
-	return nil
 }
 
-func (t *typer) visitReturnStmt(r *ReturnStmt) *typ.Error {
+func (t *typer) visitReturnStmt(r *ReturnStmt) {
 	if t.fun.Ret == nil {
 		r.Box.Hint().Text = "this shouldn't have happened"
 		r.Box.Hint().Attr.Color.Add(color.FgRed)
-
-		return &typ.Error{
-			Span: r.Box,
-			Full: "function returns, but it doesn't supposed to",
-			Help: "god help you",
-		}
 	}
 
 	r.Ret.Accept(t)
@@ -379,80 +295,42 @@ func (t *typer) visitReturnStmt(r *ReturnStmt) *typ.Error {
 	if !t.fun.Ret.Typ.Equal(r.Ret.Object().Typ) {
 		panic("type mismatch")
 	}
-
-	return nil
 }
 
-func (t *typer) visitVarStmt(s *VarStmt) *typ.Error {
-	if err := s.Ini.Accept(t); err != nil {
-		err.Span = s.Box
-		return err
-	}
+func (t *typer) visitVarStmt(s *VarStmt) {
+	s.Ini.Accept(t)
 
-	if err := t.env.Insert(s.Var.Lit, &typ.Object{
+	if _, ok := t.env.Insert(s.Var.Lit, &typ.Object{
 		Typ: s.Ini.Object().Typ,
-	}); err != nil {
+	}); !ok {
+		s.Var.Hint().Text = "this symbol already taken"
+		s.Var.Hint().Attr.Color.Add(color.FgRed)
+	}
+}
+
+func (t *typer) visitLetStmt(s *LetStmt) {
+	s.Ini.Accept(t)
+
+	if _, ok := t.env.Insert(s.Var.Lit, &typ.Object{
+		Typ: s.Ini.Object().Typ,
+	}); !ok {
 		s.Var.Hint().Text = "this symbol already taken"
 		s.Var.Hint().Attr.Color.Add(color.FgRed)
 
-		return &typ.Error{
-			Span: s.Box,
-			Full: "symbol already defined",
-			Help: "god help you",
-		}
 	}
-
-	return nil
 }
 
-func (t *typer) visitLetStmt(s *LetStmt) *typ.Error {
-	if err := s.Ini.Accept(t); err != nil {
-		err.Span = s.Box
-		return err
-	}
-
-	if err := t.env.Insert(s.Var.Lit, &typ.Object{
-		Typ: s.Ini.Object().Typ,
-	}); err != nil {
-		s.Var.Hint().Text = "this symbol already taken"
-		s.Var.Hint().Attr.Color.Add(color.FgRed)
-
-		return &typ.Error{
-			Span: s.Box,
-			Full: "symbol already defined",
-			Help: "god help you",
-		}
-	}
-
-	return nil
-}
-
-func (t *typer) visitAssignStmt(a *AssignStmt) *typ.Error {
-	if err := a.Var.Accept(t); err != nil {
-		err.Span = a.Box
-		return err
-	}
-
-	if err := a.Val.Accept(t); err != nil {
-		err.Span = a.Box
-		return err
-	}
+func (t *typer) visitAssignStmt(a *AssignStmt) {
+	a.Var.Accept(t)
+	a.Val.Accept(t)
 
 	if !a.Var.Object().Typ.Equal(a.Val.Object().Typ) {
 		a.Box.Hint().Text = "type mismatch"
 		a.Box.Hint().Attr.Color.Add(color.FgRed)
-
-		return &typ.Error{
-			Span: a.Box,
-			Full: "type mismatch in assignment",
-			Help: "god help you",
-		}
 	}
-
-	return nil
 }
 
-func (t *typer) VisitExpr(u Expr) *typ.Error {
+func (t *typer) VisitExpr(u Expr) {
 	switch e := u.(type) {
 	case *BasicExpr:
 		t.visitBasicExpr(e)
@@ -471,7 +349,7 @@ func (t *typer) VisitExpr(u Expr) *typ.Error {
 		switch e.Ctx.Object().Typ.Kind {
 		case typ.PKG:
 			inf := e.Ctx.Object().Typ.Extra.(*mod.Package)
-			e.Obj, _ = inf.Env.Lookup(e.Mem.Lit)
+			e.Obj, _ = inf.Env.(*typ.Env).Lookup(e.Mem.Lit)
 
 			if e.Obj == nil {
 				panic("unknown package member")
@@ -517,6 +395,7 @@ func (t *typer) VisitExpr(u Expr) *typ.Error {
 		}
 
 		e.Res = &typ.Object{
+			Loc: typ.Location{File: t.src, Span: e.Box},
 			Typ: ox.Typ,
 		}
 	case *PfxExpr:
@@ -563,6 +442,7 @@ func (t *typer) VisitExpr(u Expr) *typ.Error {
 		}
 
 		e.Ret = &typ.Object{
+			Loc: typ.Location{File: t.src, Span: e.Box},
 			Typ: fun.Ret.Typ,
 		}
 	case *ToI64Expr:
@@ -573,6 +453,7 @@ func (t *typer) VisitExpr(u Expr) *typ.Error {
 		}
 
 		e.Res = &typ.Object{
+			Loc: typ.Location{File: t.src, Span: e.Box},
 			Typ: &typ.I64Type,
 		}
 	case *ToU64Expr:
@@ -583,6 +464,7 @@ func (t *typer) VisitExpr(u Expr) *typ.Error {
 		}
 
 		e.Res = &typ.Object{
+			Loc: typ.Location{File: t.src, Span: e.Box},
 			Typ: &typ.U64Type,
 		}
 	case *ToF64Expr:
@@ -593,20 +475,19 @@ func (t *typer) VisitExpr(u Expr) *typ.Error {
 		}
 
 		e.Res = &typ.Object{
+			Loc: typ.Location{File: t.src, Span: e.Box},
 			Typ: &typ.U64Type,
 		}
 	}
-
-	return nil
 }
 
 func (t *typer) visitBasicExpr(e *BasicExpr) {
-	if obj, ok := t.pkg.Sym[e.Lex.Tok.Lit]; ok {
+	if obj, _ := t.pkg.Env.(*typ.Env).Lookup(e.Lex.Tok.Lit); obj != nil {
 		e.Obj = obj
 		return
 	}
 
-	e.Obj = &typ.Object{}
+	e.Obj = &typ.Object{Loc: typ.Location{File: t.src, Span: e.Span()}}
 
 	switch e.Lex.Typ {
 	case lex.II64:
@@ -626,7 +507,7 @@ func (t *typer) visitBasicExpr(e *BasicExpr) {
 		e.Obj.Val, _ = strconv.ParseBool(e.Lex.Tok.Lit)
 	}
 
-	t.pkg.Sym[e.Lex.Tok.Lit] = e.Obj
+	t.pkg.Env.(*typ.Env).Insert(e.Lex.Tok.Lit, e.Obj)
 }
 
 func (t *typer) visitStructExpr(e *StructExpr) {
@@ -653,6 +534,7 @@ func (t *typer) visitStructExpr(e *StructExpr) {
 	}
 
 	e.Obj = &typ.Object{
+		Loc: typ.Location{File: t.src, Span: e.Box},
 		Typ: obj.Typ,
 	}
 }

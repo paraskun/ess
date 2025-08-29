@@ -27,8 +27,8 @@ const (
 
 	PKG
 	DEC
-	ANY
 	REF
+	ANY
 
 	FUNC
 	ENUM
@@ -38,11 +38,11 @@ const (
 
 type (
 	// Type is a collection of invariant properties
-	// associated with each object.
+	// associated with each Object.
 	Type struct {
 		Kind Kind
 
-		// PKG 		-> *env.Package
+		// PKG 		-> *mod.Package
 		// DEC		-> *Type
 		// REF 		-> *Type
 		// FUNC 	-> *Func
@@ -57,7 +57,6 @@ type (
 	Field struct {
 		Name string // name, maybe empty
 		Typ  *Type  // type
-		Off  int    // offset (for structs)
 	}
 
 	Func struct {
@@ -82,7 +81,7 @@ type (
 	}
 )
 
-// Size returns how much bytes occupies object
+// Size returns how much bytes occupies Object
 // of that type bypassing all references.
 func (t *Type) Size() (r int) {
 	switch t.Kind {
@@ -105,8 +104,7 @@ func (t *Type) Size() (r int) {
 	return r
 }
 
-// Equal checks if two types are compatible
-// to each other.
+// Equal checks if two types are compatible to each other.
 func (t *Type) Equal(o *Type) bool {
 	if t == nil || o == nil {
 		return false
@@ -115,7 +113,7 @@ func (t *Type) Equal(o *Type) bool {
 	return t == o
 }
 
-// Predefined data types
+// Basic data types
 
 var (
 	AnyType  = Type{Kind: ANY}
