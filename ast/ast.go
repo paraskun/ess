@@ -323,7 +323,7 @@ func (p *parser) must(t lex.Type) (*lex.Lexeme, *typ.Error) {
 
 		p.err = &typ.Error{
 			Full: fmt.Sprintf("%s expected, but %s were given", t, p.cur.Typ),
-			Snip: []typ.Location{{File: p.src, Span: p.cur.Tok}},
+			Snip: []*typ.Location{{File: p.src, Span: p.cur.Tok}},
 		}
 	}
 
@@ -453,7 +453,7 @@ func (p *parser) parseDecl() (Decl, *typ.Error) {
 
 			return nil, &typ.Error{
 				Full: "package not found",
-				Snip: []typ.Location{{File: p.src, Span: use.Span()}},
+				Snip: []*typ.Location{{File: p.src, Span: use.Span()}},
 			}
 		}
 
@@ -490,7 +490,7 @@ func (p *parser) parseDecl() (Decl, *typ.Error) {
 
 		return nil, &typ.Error{
 			Full: "unexpected control sequence",
-			Snip: []typ.Location{{File: p.src, Span: tok.Tok}},
+			Snip: []*typ.Location{{File: p.src, Span: tok.Tok}},
 		}
 	}
 }
@@ -817,7 +817,7 @@ func (p *parser) parseTypeSpec(g tty.Group, r, b int) (*TypeSpec, *typ.Error) {
 
 	return nil, &typ.Error{
 		Full: "unexpected control sequence",
-		Snip: []typ.Location{{File: p.src, Span: tok.Tok}},
+		Snip: []*typ.Location{{File: p.src, Span: tok.Tok}},
 	}
 }
 
@@ -1018,7 +1018,7 @@ func (p *parser) parseStmt() (Stmt, *typ.Error) {
 
 	return nil, &typ.Error{
 		Full: "unexpected control sequence",
-		Snip: []typ.Location{{File: p.src, Span: tok.Tok}},
+		Snip: []*typ.Location{{File: p.src, Span: tok.Tok}},
 	}
 }
 
@@ -2369,7 +2369,7 @@ func (p *parser) parseExpr7() (Expr, *typ.Error) {
 
 	return nil, &typ.Error{
 		Full: "unexpected control sequence",
-		Snip: []typ.Location{{File: p.src, Span: tok.Tok}},
+		Snip: []*typ.Location{{File: p.src, Span: tok.Tok}},
 	}
 }
 

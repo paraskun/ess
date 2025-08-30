@@ -198,7 +198,7 @@ func (s *Scanner) Next() (*Lexeme, *typ.Error) {
 
 		return nil, &typ.Error{
 			Full: fmt.Sprintf("scanner: unknown symbol at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
-			Snip: []typ.Location{{File: s.Src, Span: t.Tok}},
+			Snip: []*typ.Location{{File: s.Src, Span: t.Tok}},
 		}
 	}
 
@@ -246,7 +246,7 @@ func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, *typ.Error) {
 					Full: fmt.Sprintf("scanner: malfomed floating point literal at %d:%d",
 						t.Tok.Pos.Row,
 						t.Tok.Pos.Col),
-					Snip: []typ.Location{{File: s.Src, Span: t.Tok}},
+					Snip: []*typ.Location{{File: s.Src, Span: t.Tok}},
 				}
 			}
 
@@ -273,7 +273,7 @@ func (s *Scanner) nextNum(t *Lexeme) (*Lexeme, *typ.Error) {
 			Full: fmt.Sprintf("scanner: malfomed numeric literal at %d:%d",
 				t.Tok.Pos.Row,
 				t.Tok.Pos.Col),
-			Snip: []typ.Location{{File: s.Src, Span: t.Tok}},
+			Snip: []*typ.Location{{File: s.Src, Span: t.Tok}},
 		}
 	}
 
@@ -321,7 +321,7 @@ func (s *Scanner) nextStr(t *Lexeme) (*Lexeme, *typ.Error) {
 
 			return nil, &typ.Error{
 				Full: fmt.Sprintf("scanner: malfomed string literal at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
-				Snip: []typ.Location{{File: s.Src, Span: t.Tok}},
+				Snip: []*typ.Location{{File: s.Src, Span: t.Tok}},
 			}
 		}
 
@@ -343,7 +343,7 @@ func (s *Scanner) nextStr(t *Lexeme) (*Lexeme, *typ.Error) {
 
 		return nil, &typ.Error{
 			Full: fmt.Sprintf("scanner: malfomed string literal at %d:%d", t.Tok.Pos.Row, t.Tok.Pos.Col),
-			Snip: []typ.Location{{File: s.Src, Span: t.Tok}},
+			Snip: []*typ.Location{{File: s.Src, Span: t.Tok}},
 		}
 
 	}

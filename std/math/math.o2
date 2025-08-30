@@ -3,6 +3,11 @@ type event {
     val f64
 }
 
+type event {
+    dev u64
+    val f64
+}
+
 enum state {
     Running
     Waiting
@@ -10,6 +15,6 @@ enum state {
 
 var a = 10;
 
-func add(a f64, b f64) (f) {
+func add(a f64, b f64) (f64) {
     return a + b;
 }

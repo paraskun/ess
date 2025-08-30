@@ -55,19 +55,22 @@ type (
 	// Field is a named or unnamed member
 	// of some logical group.
 	Field struct {
-		Name string // name, maybe empty
-		Typ  *Type  // type
+		Name string    // name, maybe empty
+		Typ  *Type     // type
+		Loc  *Location // place of declaration
 	}
 
 	Func struct {
 		Arg []*Field
 		Ret *Field
-		Dec any // *ast.FuncDecl
+		Dec any       // node, *ast.FuncDecl
+		Loc *Location // place of declaration
 	}
 
 	Enum struct {
 		Mem map[string]uint8
-		Dec any // *ast.EnumDecl
+		Dec any       // node, *ast.EnumDecl
+		Loc *Location // place of declaration
 	}
 
 	Array struct {
@@ -77,7 +80,8 @@ type (
 
 	Struct struct {
 		Mem map[string]*Field
-		Dec any // *ast.StructDecl
+		Dec any       // *ast.StructDecl
+		Loc *Location // place of declaration
 	}
 )
 

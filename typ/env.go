@@ -27,10 +27,10 @@ type Location struct {
 // Multiple entities can share the same Type, but
 // each can only have one associated Object.
 type Object struct {
-	Loc Location // place of declaration
-	Typ *Type    // inferred type
-	Seg Segment  // runtime location
-	Val any      // compilation time value, maybe nil
+	Loc *Location // place of declaration
+	Typ *Type     // inferred type
+	Seg Segment   // runtime location
+	Val any       // compilation time value, maybe nil
 }
 
 // Size returns how much bytes object occupies.

@@ -81,8 +81,8 @@ func (t *Tok) Reset() {
 }
 
 func (t *Tok) Render() {
-	t.Pos.Row = t.Pos.ind.Box
-	t.Pos.Col = t.Pos.ind.Row
+	t.Pos.Row += t.Pos.ind.Box
+	t.Pos.Col += t.Pos.ind.Row
 }
 
 func (t *Tok) draw(w io.Writer) {
@@ -505,6 +505,7 @@ func (b *Box) draw(w io.Writer) {
 
 		default:
 			b.pending.Attr.Color.Fprintf(w, "└──── %s", b.pending.Text)
+			b.pending.Text = ""
 			b.entry += 1
 			b.state = 0
 		}
@@ -512,6 +513,7 @@ func (b *Box) draw(w io.Writer) {
 	case 4:
 		b.pending.Attr.Color.Fprintf(w, "%s", strings.Repeat(" ", b.pending.offset+b.pending.size/2))
 		b.pending.Attr.Color.Fprintf(w, "╰─ %s", b.pending.Text)
+		b.pending.Text = ""
 		b.entry += 1
 		b.state = 0
 	}

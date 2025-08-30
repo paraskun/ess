@@ -57,34 +57,47 @@ func (t *typer) visitUseDecl(d *UseDecl) {
 	Typeset(d.Obj.Typ.Extra.(*mod.Package))
 }
 
-func (t *typer) visitVarDecl(d *VarDecl) *typ.Error {
+func (t *typer) visitVarDecl(d *VarDecl) {
+	t.ctx = d.Box
 	d.Ini.Accept(t)
 
-	if _, ok := t.env.Insert(d.Var.Lit, &typ.Object{
+	if prv, ok := t.env.Insert(d.Var.Lit, &typ.Object{
 		Loc: typ.Location{File: t.src, Span: d.Box},
 		Typ: d.Ini.Object().Typ,
 		Val: d.Ini.Object().Val,
 	}); !ok {
-		panic("already defined")
-	}
+		err := &typ.Error{
+			Full: fmt.Sprintf("the name \"%s\" is defined multiple times", d.Var.Lit),
+			Snip: []*typ.Location{
+				&prv.Loc,
+				{File: t.src, Span: d.Box},
+			},
+		}
 
-	return nil
+		prv.Loc.Span.Hint().Text = "previous definiton here"
+		prv.Loc.Span.Hint().Attr.Color.Add(color.FgCyan)
+
+		d.Box.Hint().Text = "redefined here"
+		d.Box.Hint().Attr.Color.Add(color.FgRed)
+
+		err.Note(os.Stdout)
+	}
 }
 
 func (t *typer) visitFuncDecl(d *FuncDecl) {
-	t.ctx = d.Box
+	t.ctx = d.Sig
 	d.Env = typ.NewEnv(t.env)
 	d.Obj = &typ.Object{
-		Loc: typ.Location{File: t.src, Span: d.Box},
+		Loc: typ.Location{File: t.src, Span: d.Sig},
 		Typ: t.visitFuncSpec(d),
 	}
 
 	if prv, ok := t.env.Insert(d.Sym.Lit, d.Obj); !ok {
 		err := &typ.Error{
 			Full: fmt.Sprintf("the name \"%s\" is defined multiple times", d.Sym.Lit),
-			Snip: []typ.Location{
-				prv.Loc,
-				{File: t.src, Span: t.ctx},
+			Snip: []*typ.Location{
+				&prv.Loc,
+				{File: t.src, Span: d.Sig},
 			},
 		}
 
@@ -97,6 +110,7 @@ func (t *typer) visitFuncDecl(d *FuncDecl) {
 		err.Note(os.Stdout)
 	}
 
+	t.ctx = d.Box
 	t.env = d.Env
 	t.fun = d.Obj.Typ.Extra.(*typ.Func)
 
@@ -125,9 +139,23 @@ func (t *typer) visitFuncSpec(d *FuncDecl) *typ.Type {
 			Typ: arg.Typ.Typ,
 		}
 
-		if _, ok := d.Env.Insert(arg.Sym.Lit, obj); !ok {
-			arg.Box.Hint().Text = "this argument is already declared"
+		if prv, ok := d.Env.Insert(arg.Sym.Lit, obj); !ok {
+			err := &typ.Error{
+				Full: fmt.Sprintf("the argument \"%s\" is defined multiple times", arg.Sym.Lit),
+				Snip: []*typ.Location{
+					{File: t.src, Span: d.Sig},
+					{File: t.src, Span: d.Sig},
+				},
+			}
+
+			prv.Loc.Span.Hint().Text = "previous definiton here"
+			prv.Loc.Span.Hint().Attr.Color.Add(color.FgCyan)
+
+			arg.Box.Hint().Text = "redefined here"
 			arg.Box.Hint().Attr.Color.Add(color.FgRed)
+
+			err.Note(os.Stdout)
+
 		}
 
 		e.Arg = append(e.Arg, &typ.Field{
@@ -137,6 +165,7 @@ func (t *typer) visitFuncSpec(d *FuncDecl) *typ.Type {
 	}
 
 	if d.Ret != nil {
+		t.ctx = d.Sig
 		t.visitTypeSpec(d.Ret)
 
 		e.Ret = &typ.Field{
@@ -160,23 +189,16 @@ func (t *typer) visitTypeSpec(s *TypeSpec) {
 	case lex.IDEN:
 		sym, _ := t.env.Lookup(s.Lex.Tok.Lit)
 
-		if sym == nil {
+		if sym == nil || (sym.Typ.Kind != typ.ENUM && sym.Typ.Kind != typ.STRUCT) {
 			err := &typ.Error{
 				Full: fmt.Sprintf("there is no type \"%s\" in this scope", s.Lex.Tok.Lit),
-				Snip: []typ.Location{{File: t.src, Span: t.ctx}},
+				Snip: []*typ.Location{{File: t.src, Span: t.ctx}},
 			}
 
 			s.Lex.Tok.Hint().Text = "unknown type here"
 			s.Lex.Tok.Hint().Attr.Color.Add(color.FgRed)
 
 			err.Note(os.Stdout)
-
-			return
-		}
-
-		if sym.Typ.Kind != typ.ENUM && sym.Typ.Kind != typ.STRUCT {
-			s.Lex.Tok.Hint().Text = "type specification expected here"
-			s.Lex.Tok.Hint().Attr.Color.Add(color.FgRed)
 
 			return
 		}
@@ -191,9 +213,22 @@ func (t *typer) visitStructDecl(d *StructDecl) {
 		Typ: t.visitStructSpec(d),
 	}
 
-	if _, ok := t.env.Insert(d.Sym.Lit, d.Obj); !ok {
-		d.Box.Hint().Text = "this structure is already defined"
+	if prv, ok := t.env.Insert(d.Sym.Lit, d.Obj); !ok {
+		err := &typ.Error{
+			Full: fmt.Sprintf("the name \"%s\" is defined multiple times", d.Sym.Lit),
+			Snip: []*typ.Location{
+				&prv.Loc,
+				{File: t.src, Span: d.Box},
+			},
+		}
+
+		prv.Loc.Span.Hint().Text = "previous definiton here"
+		prv.Loc.Span.Hint().Attr.Color.Add(color.FgCyan)
+
+		d.Box.Hint().Text = "redefined here"
 		d.Box.Hint().Attr.Color.Add(color.FgRed)
+
+		err.Note(os.Stdout)
 	}
 }
 
@@ -204,15 +239,33 @@ func (t *typer) visitStructSpec(d *StructDecl) *typ.Type {
 	for _, mem := range d.Mem {
 		t.visitTypeSpec(mem.Typ)
 
-		if _, ok := e.Mem[mem.Sym.Lit]; ok {
+		if prv, ok := e.Mem[mem.Sym.Lit]; ok {
 			mem.Box.Hint().Text = "this field is already defined"
 			mem.Box.Hint().Attr.Color.Add(color.FgRed)
+
+			err := &typ.Error{
+				Full: fmt.Sprintf("the argument \"%s\" is defined multiple times", arg.Sym.Lit),
+				Snip: []*typ.Location{
+					{File: t.src, Span: d.Sig},
+					{File: t.src, Span: d.Sig},
+				},
+			}
+				
+			prv.Loc.Span.Hint().Text = "previous definiton here"
+			prv.Loc.Span.Hint().Attr.Color.Add(color.FgCyan)
+
+			arg.Box.Hint().Text = "redefined here"
+			arg.Box.Hint().Attr.Color.Add(color.FgRed)
+
+			err.Note(os.Stdout)
+
+		} else {
+			e.Mem[mem.Sym.Lit] = &typ.Field{
+				Name: mem.Sym.Lit,
+				Typ:  mem.Typ.Typ,
+			}
 		}
 
-		e.Mem[mem.Sym.Lit] = &typ.Field{
-			Name: mem.Sym.Lit,
-			Typ:  mem.Typ.Typ,
-		}
 	}
 
 	return r

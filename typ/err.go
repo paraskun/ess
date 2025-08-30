@@ -10,7 +10,7 @@ import (
 type Error struct {
 	Full string
 	Help string
-	Snip []Location
+	Snip []*Location
 }
 
 func (err *Error) Error() string {
@@ -27,6 +27,8 @@ func (err *Error) Note(w io.Writer) {
 			Name: fmt.Sprintf("%s/%s%s", s.File.Pkg.Mod.Mod.Name, s.File.Pkg.Path, s.File.Name),
 			Span: tty.BoxOf(s.Span),
 		})
+
+		fmt.Fprintln(w)
 	}
 
 	if err.Help != "" {
