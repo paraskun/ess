@@ -7,7 +7,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/fatih/color"
+	"github.com/paraskun/o2/typ/mod"
 )
+
+type Snippet struct {
+	File *mod.File
+	Span Span
+}
 
 type indent struct {
 	Row int
