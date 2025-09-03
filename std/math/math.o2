@@ -3,12 +3,8 @@ type event {
     val f64
 }
 
-type event {
-    dev u64
-    val f64
-}
-
 enum state {
+    Waiting
     Running
     Waiting
 }

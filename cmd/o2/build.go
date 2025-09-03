@@ -37,7 +37,10 @@ var build = &cobra.Command{
 			panic("no such package current module")
 		}
 
-		ast.Parse(p)
+		if !ast.Parse(p){
+			return nil
+		}
+
 		ast.Typeset(p)
 
 		return nil

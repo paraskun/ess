@@ -2,7 +2,6 @@ package typ
 
 import (
 	"github.com/paraskun/o2/tty"
-	"github.com/paraskun/o2/typ/mod"
 )
 
 // Segment is a runtime location of an Object.
@@ -17,20 +16,16 @@ const (
 	Static  // reserved per-function data
 )
 
-type Location struct {
-	File *mod.File
-	Span tty.Span
-}
-
 // Object is a unique typed program entity.
 //
 // Multiple entities can share the same Type, but
 // each can only have one associated Object.
 type Object struct {
-	Loc *Location // place of declaration
-	Typ *Type     // inferred type
-	Seg Segment   // runtime location
-	Val any       // compilation time value, maybe nil
+	Snip *tty.Snippet // place of declaration
+
+	Typ *Type   // inferred type
+	Seg Segment // runtime location
+	Val any     // compilation time value, maybe nil
 }
 
 // Size returns how much bytes object occupies.

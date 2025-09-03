@@ -10,11 +10,6 @@ import (
 	"github.com/paraskun/o2/typ/mod"
 )
 
-type Snippet struct {
-	File *mod.File
-	Span Span
-}
-
 type indent struct {
 	Row int
 	Box int
@@ -641,7 +636,23 @@ func (*Frame) getHint() *Hint {
 	return nil
 }
 
+type Snippet struct {
+	File *mod.File
+	Span Span
+}
+
+func (s *Snippet) Print(w io.Writer) {
+	f := &Frame{
+		Name: fmt.Sprintf("%s/%s%s", s.File.Pkg.Mod.Mod.Name, s.File.Pkg.Path, s.File.Name),
+		Span: BoxOf(s.Span),
+	}
+
+	Print(w, f)
+}
+
 func Print(w io.Writer, s Span) {
+	s.Reset()
+
 	for s.next() != -1 {
 		s.draw(w)
 	}
