@@ -1025,7 +1025,7 @@ func (p *parser) parseStmt() (Stmt, *typ.Error) {
 }
 
 func (p *parser) parseCall(sym *tty.Tok) (*CallExpr, *typ.Error) {
-	res := &CallExpr{}
+	res := &CallExpr{Sym: sym}
 	top := &tty.Row{}
 
 	top.Add(sym, 0, 0)
@@ -1037,8 +1037,10 @@ func (p *parser) parseCall(sym *tty.Tok) (*CallExpr, *typ.Error) {
 
 	box := &tty.Box{}
 	row := top
+	num := 0
+	run := true
 
-	for {
+	for run {
 		tok, err := p.peekIn(top, 1, 0)
 
 		if err != nil {
@@ -1056,17 +1058,23 @@ func (p *parser) parseCall(sym *tty.Tok) (*CallExpr, *typ.Error) {
 			switch b := err.Snip[0].Span.(type) {
 			case *tty.Box:
 				if row.Len() != 0 {
-					box.Add(row, Indent, 0)
+					if box.Len() == 0 {
+						box.Add(row, 0, 0)
+					} else {
+						box.Add(row, Indent, 0)
+					}
 				}
 
 				box.Add(b, Indent, 0)
 				res.Box = box
 			case tty.Mono:
-				if row.Len() != 0 {
+				if num != 0 {
 					row.Add(b, 1, 0)
 				} else {
 					row.Add(b, 0, 0)
 				}
+
+				num += 1
 
 				if box.Len() != 0 {
 					box.Add(row, Indent, 0)
@@ -1084,10 +1092,14 @@ func (p *parser) parseCall(sym *tty.Tok) (*CallExpr, *typ.Error) {
 		switch b := arg.Span().(type) {
 		case *tty.Box:
 			if row.Len() != 0 {
-				box.Add(row, 4, 0)
+				if box.Len() == 0 {
+					box.Add(row, 0, 0)
+				} else {
+					box.Add(row, Indent, 0)
+				}
 			}
 
-			box.Add(b, 4, 0)
+			box.Add(b, Indent, 0)
 			tok, err := p.peek()
 
 			if err != nil {
@@ -1106,6 +1118,7 @@ func (p *parser) parseCall(sym *tty.Tok) (*CallExpr, *typ.Error) {
 					return nil, err
 				}
 
+				num = 0
 				row = &tty.Row{}
 			} else {
 				tok, err := p.must(lex.RP)
@@ -1115,14 +1128,17 @@ func (p *parser) parseCall(sym *tty.Tok) (*CallExpr, *typ.Error) {
 					err.Snip[0].Span = box
 					return nil, err
 				}
+
+				run = false
 			}
 		case tty.Mono:
-			if row.Len() != 0 {
+			if num != 0 {
 				row.Add(b, 1, 0)
 			} else {
 				row.Add(b, 0, 0)
 			}
 
+			num += 1
 			tok, err := p.peekIn(row, 1, 0)
 
 			if err != nil {
@@ -1137,6 +1153,8 @@ func (p *parser) parseCall(sym *tty.Tok) (*CallExpr, *typ.Error) {
 				if _, err := p.mustIn(lex.RP, row, 0, 0); err != nil {
 					return nil, err
 				}
+
+				run = false
 			}
 		}
 

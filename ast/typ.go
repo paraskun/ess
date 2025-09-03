@@ -61,25 +61,11 @@ func (t *typer) visitVarDecl(d *VarDecl) {
 	t.ctx = d.Box
 	d.Ini.Accept(t)
 
-	if prv, ok := t.env.Insert(d.Var.Lit, &typ.Object{
+	if _, err := t.env.Insert(d.Var.Lit, &typ.Object{
 		Snip: &tty.Snippet{File: t.src, Span: d.Box},
 		Typ:  d.Ini.Object().Typ,
 		Val:  d.Ini.Object().Val,
-	}); !ok {
-		err := &typ.Error{
-			Full: fmt.Sprintf("the name \"%s\" is defined multiple times", d.Var.Lit),
-			Snip: []*tty.Snippet{
-				prv.Snip,
-				{File: t.src, Span: d.Box},
-			},
-		}
-
-		prv.Snip.Span.Hint().Text = "previous definiton here"
-		prv.Snip.Span.Hint().Attr.Color.Add(color.FgCyan)
-
-		d.Box.Hint().Text = "redefined here"
-		d.Box.Hint().Attr.Color.Add(color.FgRed)
-
+	}); err != nil {
 		err.Note(os.Stdout)
 	}
 }
@@ -92,21 +78,7 @@ func (t *typer) visitFuncDecl(d *FuncDecl) {
 		Typ:  t.visitFuncSpec(d),
 	}
 
-	if prv, ok := t.env.Insert(d.Sym.Lit, d.Obj); !ok {
-		err := &typ.Error{
-			Full: fmt.Sprintf("the name \"%s\" is defined multiple times", d.Sym.Lit),
-			Snip: []*tty.Snippet{
-				prv.Snip,
-				{File: t.src, Span: d.Sig},
-			},
-		}
-
-		prv.Snip.Span.Hint().Text = "previous definiton here"
-		prv.Snip.Span.Hint().Attr.Color.Add(color.FgCyan)
-
-		d.Box.Hint().Text = "redefined here"
-		d.Box.Hint().Attr.Color.Add(color.FgRed)
-
+	if _, err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
 		err.Note(os.Stdout)
 	}
 
@@ -134,29 +106,15 @@ func (t *typer) visitFuncSpec(d *FuncDecl) *typ.Type {
 			Typ:  arg.Typ.Typ,
 		}
 
-		if prv, ok := d.Env.Insert(arg.Sym.Lit, obj); !ok {
-			err := &typ.Error{
-				Full: fmt.Sprintf("the argument \"%s\" is defined multiple times", arg.Sym.Lit),
-				Snip: []*tty.Snippet{
-					{File: t.src, Span: d.Sig},
-					{File: t.src, Span: d.Sig},
-				},
-			}
-
-			prv.Snip.Span.Hint().Text = "previous definiton here"
-			prv.Snip.Span.Hint().Attr.Color.Add(color.FgCyan)
-
-			arg.Box.Hint().Text = "redefined here"
-			arg.Box.Hint().Attr.Color.Add(color.FgRed)
-
+		if _, err := d.Env.Insert(arg.Sym.Lit, obj); err != nil {
 			err.Note(os.Stdout)
 
 		}
 
 		e.Arg = append(e.Arg, &typ.Field{
-			Span: arg.Box,
 			Name: arg.Sym.Lit,
 			Typ:  obj.Typ,
+			Dec:  arg,
 		})
 	}
 
@@ -165,8 +123,8 @@ func (t *typer) visitFuncSpec(d *FuncDecl) *typ.Type {
 		t.visitTypeSpec(d.Ret)
 
 		e.Ret = &typ.Field{
-			Span: d.Ret.Lex.Tok,
-			Typ:  d.Ret.Typ,
+			Typ: d.Ret.Typ,
+			Dec: d.Ret,
 		}
 	}
 
@@ -210,21 +168,7 @@ func (t *typer) visitStructDecl(d *StructDecl) {
 		Typ:  t.visitStructSpec(d),
 	}
 
-	if prv, ok := t.env.Insert(d.Sym.Lit, d.Obj); !ok {
-		err := &typ.Error{
-			Full: fmt.Sprintf("the name \"%s\" is defined multiple times", d.Sym.Lit),
-			Snip: []*tty.Snippet{
-				prv.Snip,
-				{File: t.src, Span: d.Box},
-			},
-		}
-
-		prv.Snip.Span.Hint().Text = "previous definiton here"
-		prv.Snip.Span.Hint().Attr.Color.Add(color.FgCyan)
-
-		d.Box.Hint().Text = "redefined here"
-		d.Box.Hint().Attr.Color.Add(color.FgRed)
-
+	if _, err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
 		err.Note(os.Stdout)
 	}
 }
@@ -245,8 +189,8 @@ func (t *typer) visitStructSpec(d *StructDecl) *typ.Type {
 				},
 			}
 
-			prv.Span.Hint().Text = "previous definiton here"
-			prv.Span.Hint().Attr.Color.Add(color.FgCyan)
+			prv.Dec.(*NamedField).Box.Hint().Text = "previous definiton here"
+			prv.Dec.(*NamedField).Box.Hint().Attr.Color.Add(color.FgCyan)
 
 			mem.Box.Hint().Text = "redefined here"
 			mem.Box.Hint().Attr.Color.Add(color.FgRed)
@@ -256,6 +200,7 @@ func (t *typer) visitStructSpec(d *StructDecl) *typ.Type {
 			e.Mem[mem.Sym.Lit] = &typ.Field{
 				Name: mem.Sym.Lit,
 				Typ:  mem.Typ.Typ,
+				Dec:  mem,
 			}
 		}
 	}
@@ -269,21 +214,7 @@ func (t *typer) visitEnumDecl(d *EnumDecl) {
 		Typ:  t.visitEnumSpec(d),
 	}
 
-	if prv, ok := t.env.Insert(d.Sym.Lit, d.Obj); !ok {
-		err := &typ.Error{
-			Full: fmt.Sprintf("the name \"%s\" is defined multiple times", d.Sym.Lit),
-			Snip: []*tty.Snippet{
-				prv.Snip,
-				{File: t.src, Span: d.Box},
-			},
-		}
-
-		prv.Snip.Span.Hint().Text = "previous definiton here"
-		prv.Snip.Span.Hint().Attr.Color.Add(color.FgCyan)
-
-		d.Box.Hint().Text = "redefined here"
-		d.Box.Hint().Attr.Color.Add(color.FgRed)
-
+	if _, err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
 		err.Note(os.Stdout)
 	}
 }
@@ -301,8 +232,8 @@ func (t *typer) visitEnumSpec(d *EnumDecl) *typ.Type {
 				},
 			}
 
-			prv.Span.Hint().Text = "previous definiton here"
-			prv.Span.Hint().Attr.Color.Add(color.FgCyan)
+			prv.Dec.(*tty.Tok).Hint().Text = "previous definiton here"
+			prv.Dec.(*tty.Tok).Hint().Attr.Color.Add(color.FgCyan)
 
 			mem.Hint().Text = "redefined here"
 			mem.Hint().Attr.Color.Add(color.FgRed)
@@ -310,8 +241,9 @@ func (t *typer) visitEnumSpec(d *EnumDecl) *typ.Type {
 			err.Note(os.Stdout)
 		} else {
 			e.Mem[mem.Lit] = &typ.Field{
-				Span: mem,
-				Typ: r,
+				Name: mem.Lit,
+				Typ:  r,
+				Dec:  mem,
 			}
 		}
 
@@ -352,8 +284,25 @@ func (t *typer) VisitStmt(u Stmt) {
 	case *CallStmt:
 		s.CallExpr.Accept(t)
 
-		if s.Object().Typ.Extra.(*typ.Func).Ret != nil {
-			panic("missed return")
+		f := s.Fun.Typ.Extra.(*typ.Func)
+		d := f.Dec.(*FuncDecl)
+
+		if f.Ret != nil {
+			err := &typ.Error{
+				Full: "missing function return value",
+				Snip: []*tty.Snippet{
+					{File: t.src, Span: t.ctx},
+					{File: s.Fun.Snip.File, Span: d.Span()},
+				},
+			}
+
+			s.Span().Hint().Text = "this call produces something"
+			s.Span().Hint().Attr.Color.Add(color.FgRed)
+
+			d.Span().Hint().Text = "as defined here"
+			d.Span().Hint().Attr.Color.Add(color.FgCyan)
+
+			err.Note(os.Stdout)
 		}
 	}
 }
@@ -374,25 +323,22 @@ func (t *typer) visitReturnStmt(r *ReturnStmt) {
 func (t *typer) visitVarStmt(s *VarStmt) {
 	s.Ini.Accept(t)
 
-	if _, ok := t.env.Insert(s.Var.Lit, &typ.Object{
+	if _, err := t.env.Insert(s.Var.Lit, &typ.Object{
 		Snip: &tty.Snippet{File: t.src, Span: s.Box},
 		Typ:  s.Ini.Object().Typ,
-	}); !ok {
-		s.Var.Hint().Text = "this symbol already taken"
-		s.Var.Hint().Attr.Color.Add(color.FgRed)
+	}); err != nil {
+		err.Note(os.Stdout)
 	}
 }
 
 func (t *typer) visitLetStmt(s *LetStmt) {
 	s.Ini.Accept(t)
 
-	if _, ok := t.env.Insert(s.Var.Lit, &typ.Object{
+	if _, err := t.env.Insert(s.Var.Lit, &typ.Object{
 		Snip: &tty.Snippet{File: t.src, Span: s.Box},
 		Typ:  s.Ini.Object().Typ,
-	}); !ok {
-		s.Var.Hint().Text = "this symbol already taken"
-		s.Var.Hint().Attr.Color.Add(color.FgRed)
-
+	}); err != nil {
+		err.Note(os.Stdout)
 	}
 }
 

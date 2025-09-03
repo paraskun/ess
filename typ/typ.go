@@ -1,8 +1,6 @@
 // Package typ describes language type system.
 package typ
 
-import "github.com/paraskun/o2/tty"
-
 type Kind byte
 
 const (
@@ -42,7 +40,6 @@ type (
 	// Type is a collection of invariant properties
 	// associated with each Object.
 	Type struct {
-		Snip *tty.Snippet // place of declaration
 		Kind Kind
 
 		// PKG 		-> *mod.Package
@@ -58,15 +55,20 @@ type (
 	// Field is a named or unnamed member
 	// of some logical group.
 	Field struct {
-		Span tty.Span // place of declaration
-		Name string   // name, maybe empty
-		Typ  *Type    // type
+		Name string // name, maybe empty
+		Typ  *Type  // type
+		Dec  any    // node, ast.Node
 	}
 
 	Func struct {
 		Arg []*Field
 		Ret *Field
 		Dec any // node, *ast.FuncDecl
+	}
+
+	Struct struct {
+		Mem map[string]*Field
+		Dec any // *ast.StructDecl
 	}
 
 	Enum struct {
@@ -77,11 +79,6 @@ type (
 	Array struct {
 		Typ *Type // array member type
 		Cap int
-	}
-
-	Struct struct {
-		Mem map[string]*Field
-		Dec any // *ast.StructDecl
 	}
 )
 

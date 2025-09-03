@@ -6,11 +6,14 @@ type event {
 enum state {
     Waiting
     Running
-    Waiting
 }
 
 var a = 10;
 
 func add(a f64, b f64) (f64) {
     return a + b;
+}
+
+func test() {
+  add(1.0, 2.0);
 }

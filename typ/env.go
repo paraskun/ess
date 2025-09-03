@@ -1,6 +1,9 @@
 package typ
 
 import (
+	"fmt"
+
+	"github.com/fatih/color"
 	"github.com/paraskun/o2/tty"
 )
 
@@ -58,14 +61,26 @@ func NewEnv(p *Env) *Env {
 	return e
 }
 
-func (e *Env) Insert(name string, sym *Object) (*Object, bool) {
+func (e *Env) Insert(name string, sym *Object) (*Object, *Error) {
 	if prv, ok := e.Sym[name]; ok {
-		return prv, false
+		prv.Snip.Span.Hint().Text = "previous definiton here"
+		prv.Snip.Span.Hint().Attr.Color.Add(color.FgCyan)
+
+		sym.Snip.Span.Hint().Text = "redefined here"
+		sym.Snip.Span.Hint().Attr.Color.Add(color.FgRed)
+
+		return prv, &Error{
+			Full: fmt.Sprintf("the name \"%s\" is defined multiple times", name),
+			Snip: []*tty.Snippet{
+				prv.Snip,
+				sym.Snip,
+			},
+		}
 	}
 
 	e.Sym[name] = sym
 
-	return sym, true
+	return sym, nil
 }
 
 func (e *Env) Lookup(name string) (*Object, int) {
