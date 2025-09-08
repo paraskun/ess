@@ -17,6 +17,7 @@ const (
 	Package // immutable package-level data
 	Stack   // virtual machine stack
 	Static  // reserved per-function data
+	Native  // C
 )
 
 // Object is a unique typed program entity.

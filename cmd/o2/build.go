@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/paraskun/o2/ast"
@@ -34,14 +35,16 @@ var build = &cobra.Command{
 		p := m.Lookup(name)
 
 		if p == nil {
-			panic("no such package current module")
+			return fmt.Errorf("no such package current module")
 		}
 
-		if !ast.Parse(p){
+		if !ast.Parse(p) {
 			return nil
 		}
 
-		ast.Typeset(p)
+		if !ast.Typeset(p) {
+			return nil
+		}
 
 		return nil
 	},

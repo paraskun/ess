@@ -18,9 +18,10 @@ type typer struct {
 	env *typ.Env
 	fun *typ.Func
 	ctx tty.Span
+	err int
 }
 
-func Typeset(pkg *mod.Package) {
+func Typeset(pkg *mod.Package) bool {
 	pkg.Env = typ.NewEnv(nil)
 	ty := typer{pkg: pkg, env: pkg.Env.(*typ.Env)}
 
@@ -33,6 +34,8 @@ func Typeset(pkg *mod.Package) {
 			dec.Accept(&ty)
 		}
 	}
+
+	return ty.err == 0
 }
 
 func (t *typer) VisitDecl(u Decl) {
@@ -66,6 +69,7 @@ func (t *typer) visitVarDecl(d *VarDecl) {
 		Typ:  d.Ini.Object().Typ,
 		Val:  d.Ini.Object().Val,
 	}); err != nil {
+		t.err += 1
 		err.Note(os.Stdout)
 	}
 }
@@ -79,6 +83,7 @@ func (t *typer) visitFuncDecl(d *FuncDecl) {
 	}
 
 	if _, err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
+		t.err += 1
 		err.Note(os.Stdout)
 	}
 
@@ -95,7 +100,7 @@ func (t *typer) visitFuncDecl(d *FuncDecl) {
 }
 
 func (t *typer) visitFuncSpec(d *FuncDecl) *typ.Type {
-	e := &typ.Func{Dec: d}
+	e := &typ.Func{Name: d.Sym.Lit, Dec: d}
 	r := &typ.Type{Kind: typ.FUNC, Extra: e}
 
 	for _, arg := range d.Arg {
@@ -107,6 +112,7 @@ func (t *typer) visitFuncSpec(d *FuncDecl) *typ.Type {
 		}
 
 		if _, err := d.Env.Insert(arg.Sym.Lit, obj); err != nil {
+			t.err += 1
 			err.Note(os.Stdout)
 
 		}
@@ -153,6 +159,7 @@ func (t *typer) visitTypeSpec(s *TypeSpec) {
 			s.Lex.Tok.Hint().Text = "unknown type here"
 			s.Lex.Tok.Hint().Attr.Color.Add(color.FgRed)
 
+			t.err += 1
 			err.Note(os.Stdout)
 
 			return
@@ -169,12 +176,13 @@ func (t *typer) visitStructDecl(d *StructDecl) {
 	}
 
 	if _, err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
+		t.err += 1
 		err.Note(os.Stdout)
 	}
 }
 
 func (t *typer) visitStructSpec(d *StructDecl) *typ.Type {
-	e := &typ.Struct{Mem: make(map[string]*typ.Field), Dec: d}
+	e := &typ.Struct{Name: d.Sym.Lit, Mem: make(map[string]*typ.Field), Dec: d}
 	r := &typ.Type{Kind: typ.STRUCT, Extra: e}
 
 	for _, mem := range d.Mem {
@@ -195,6 +203,7 @@ func (t *typer) visitStructSpec(d *StructDecl) *typ.Type {
 			mem.Box.Hint().Text = "redefined here"
 			mem.Box.Hint().Attr.Color.Add(color.FgRed)
 
+			t.err += 1
 			err.Note(os.Stdout)
 		} else {
 			e.Mem[mem.Sym.Lit] = &typ.Field{
@@ -215,12 +224,13 @@ func (t *typer) visitEnumDecl(d *EnumDecl) {
 	}
 
 	if _, err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
+		t.err += 1
 		err.Note(os.Stdout)
 	}
 }
 
 func (t *typer) visitEnumSpec(d *EnumDecl) *typ.Type {
-	e := &typ.Enum{Mem: make(map[string]*typ.Field), Dec: d}
+	e := &typ.Enum{Name: d.Sym.Lit, Mem: make(map[string]*typ.Field), Dec: d}
 	r := &typ.Type{Kind: typ.ENUM, Extra: e}
 
 	for _, mem := range d.Mem {
@@ -238,6 +248,7 @@ func (t *typer) visitEnumSpec(d *EnumDecl) *typ.Type {
 			mem.Hint().Text = "redefined here"
 			mem.Hint().Attr.Color.Add(color.FgRed)
 
+			t.err += 1
 			err.Note(os.Stdout)
 		} else {
 			e.Mem[mem.Lit] = &typ.Field{
@@ -302,21 +313,55 @@ func (t *typer) VisitStmt(u Stmt) {
 			d.Span().Hint().Text = "as defined here"
 			d.Span().Hint().Attr.Color.Add(color.FgCyan)
 
+			t.err += 1
 			err.Note(os.Stdout)
 		}
 	}
 }
 
 func (t *typer) visitReturnStmt(r *ReturnStmt) {
+	d := t.fun.Dec.(*FuncDecl)
+
 	if t.fun.Ret == nil {
+		err := &typ.Error{
+			Full: "unexpected return statement",
+			Snip: []*tty.Snippet{
+				{File: t.src, Span: d.Span()},
+			},
+		}
+
+		fmt.Printf("%+v\n", d.Sig)
+
 		r.Box.Hint().Text = "this shouldn't have happened"
 		r.Box.Hint().Attr.Color.Add(color.FgRed)
+
+		d.Sig.Hint().Text = "as defined here"
+		d.Sig.Hint().Attr.Color.Add(color.FgCyan)
+
+		t.err += 1
+		err.Note(os.Stdout)
+
+		return
 	}
 
 	r.Ret.Accept(t)
 
 	if !t.fun.Ret.Typ.Equal(r.Ret.Object().Typ) {
-		panic("type mismatch")
+		err := &typ.Error{
+			Full: "type mismatch",
+			Snip: []*tty.Snippet{
+				{File: t.src, Span: d.Span()},
+			},
+		}
+
+		r.Ret.Span().Hint().Text = fmt.Sprintf("'%s' expected here", t.fun.Ret.Typ.String())
+		r.Ret.Span().Hint().Attr.Color.Add(color.FgRed)
+
+		d.Sig.Hint().Text = "as defined here"
+		d.Sig.Hint().Attr.Color.Add(color.FgCyan)
+
+		t.err += 1
+		err.Note(os.Stdout)
 	}
 }
 
@@ -327,6 +372,7 @@ func (t *typer) visitVarStmt(s *VarStmt) {
 		Snip: &tty.Snippet{File: t.src, Span: s.Box},
 		Typ:  s.Ini.Object().Typ,
 	}); err != nil {
+		t.err += 1
 		err.Note(os.Stdout)
 	}
 }
@@ -338,6 +384,7 @@ func (t *typer) visitLetStmt(s *LetStmt) {
 		Snip: &tty.Snippet{File: t.src, Span: s.Box},
 		Typ:  s.Ini.Object().Typ,
 	}); err != nil {
+		t.err += 1
 		err.Note(os.Stdout)
 	}
 }

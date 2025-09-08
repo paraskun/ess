@@ -56,24 +56,30 @@ type (
 	// of some logical group.
 	Field struct {
 		Name string // name, maybe empty
-		Typ  *Type  // type
-		Dec  any    // node, ast.Node
+
+		Typ *Type // type
+		Dec any   // node, ast.Node
 	}
 
 	Func struct {
+		Name string
+
 		Arg []*Field
 		Ret *Field
 		Dec any // node, *ast.FuncDecl
 	}
 
 	Struct struct {
+		Name string
+
 		Mem map[string]*Field
 		Dec any // *ast.StructDecl
 	}
 
 	Enum struct {
-		Mem map[string]*Field
-		Dec any // node, *ast.EnumDecl
+		Name string
+		Mem  map[string]*Field
+		Dec  any // node, *ast.EnumDecl
 	}
 
 	Array struct {
@@ -81,6 +87,33 @@ type (
 		Cap int
 	}
 )
+
+func (t *Type) String() string {
+	switch t.Kind {
+	case BOOL:
+		return "bool"
+	case I64:
+		return "i64"
+	case U64:
+		return "u64"
+	case F64:
+		return "f64"
+	case STR:
+		return "str"
+	case PKG:
+		return "pkg"
+	case FUNC:
+		return t.Extra.(*Func).Name
+	case ENUM:
+		return t.Extra.(*Enum).Name
+	case ARRAY:
+		return "arr"
+	case STRUCT:
+		return t.Extra.(*Struct).Name
+	}
+
+	return ""
+}
 
 // Size returns how much bytes occupies Object
 // of that type bypassing all references.

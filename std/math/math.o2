@@ -1,19 +1,38 @@
-type event {
-    dev u64
-    val f64
-}
-
-enum state {
-    Waiting
-    Running
-}
-
-var a = 10;
+<other>
 
 func add(a f64, b f64) (f64) {
     return a + b;
 }
 
-func test() {
-  add(1.0, 2.0);
+add:
+ldr rbp, 0
+lbr rbp, 8
+addf
+ret
+
+<current>
+
+func add(a f64, b f64) (f64) {
+    return other.add(a, b);
 }
+
+func test() {
+  let s = add(1.0, 2.0);
+}
+
+add:
+ldr rbp, 0
+ldr rbp, 8
+alk <addr>, <rdat>
+// rdp = rdp + rdat
+// rbp = rbp + 16
+// rip = addr
+ret
+
+test:
+ldr rpp, 0
+ldr rpp, 8
+rlk <roff>, <rdat>
+sdr rbp, 0
+
+

@@ -517,24 +517,21 @@ func (p *parser) parseUseDecl() (*UseDecl, *typ.Error) {
 
 func (p *parser) parseFuncDecl() (*FuncDecl, *typ.Error) {
 	dec := &FuncDecl{Sig: &tty.Row{}}
-	top := &tty.Row{}
 
-	if _, err := p.mustIn(lex.FUNC, top, 0, 0); err != nil {
-		err.Snip[0].Span = top
+	if _, err := p.mustIn(lex.FUNC, dec.Sig, 0, 0); err != nil {
+		err.Snip[0].Span = dec.Sig
 		return nil, err
 	}
 
-	top.Add(dec.Sig, 1, 0)
-
-	if tok, err := p.mustIn(lex.IDEN, dec.Sig, 0, 0); err != nil {
-		err.Snip[0].Span = top
+	if tok, err := p.mustIn(lex.IDEN, dec.Sig, 1, 0); err != nil {
+		err.Snip[0].Span = dec.Sig
 		return nil, err
 	} else {
 		dec.Sym = tok.Tok
 	}
 
 	if _, err := p.mustIn(lex.LP, dec.Sig, 0, 0); err != nil {
-		err.Snip[0].Span = top
+		err.Snip[0].Span = dec.Sig
 		return nil, err
 	}
 
@@ -542,7 +539,7 @@ func (p *parser) parseFuncDecl() (*FuncDecl, *typ.Error) {
 		tok, err := p.peekIn(dec.Sig, 0, 0)
 
 		if err != nil {
-			err.Snip[0].Span = top
+			err.Snip[0].Span = dec.Sig
 			return nil, err
 		}
 
@@ -559,7 +556,7 @@ func (p *parser) parseFuncDecl() (*FuncDecl, *typ.Error) {
 		arg, err := p.parseNamedField(dec.Sig, ind, 0)
 
 		if err != nil {
-			err.Snip[0].Span = top
+			err.Snip[0].Span = dec.Sig
 			return nil, err
 		}
 
@@ -567,27 +564,27 @@ func (p *parser) parseFuncDecl() (*FuncDecl, *typ.Error) {
 		tok, err = p.peekIn(dec.Sig, 0, 0)
 
 		if err != nil {
-			err.Snip[0].Span = top
+			err.Snip[0].Span = dec.Sig
 			return nil, err
 		}
 
 		if tok.Typ != lex.RP {
 			if _, err = p.mustIn(lex.COM, dec.Sig, 0, 0); err != nil {
-				err.Snip[0].Span = top
+				err.Snip[0].Span = dec.Sig
 				return nil, err
 			}
 		}
 	}
 
 	if _, err := p.mustIn(lex.RP, dec.Sig, 0, 0); err != nil {
-		err.Snip[0].Span = top
+		err.Snip[0].Span = dec.Sig
 		return nil, err
 	}
 
 	tok, err := p.peekIn(dec.Sig, 1, 0)
 
 	if err != nil {
-		err.Snip[0].Span = top
+		err.Snip[0].Span = dec.Sig
 		return nil, err
 	}
 
@@ -595,16 +592,18 @@ func (p *parser) parseFuncDecl() (*FuncDecl, *typ.Error) {
 		p.nextIn(dec.Sig, 1, 0)
 
 		if dec.Ret, err = p.parseTypeSpec(dec.Sig, 0, 0); err != nil {
-			err.Snip[0].Span = top
+			err.Snip[0].Span = dec.Sig
 			return nil, err
 		}
 
 		if _, err := p.mustIn(lex.RP, dec.Sig, 0, 0); err != nil {
-			err.Snip[0].Span = top
+			err.Snip[0].Span = dec.Sig
 			return nil, err
 		}
 	}
 
+	top := &tty.Row{}
+	top.Add(dec.Sig, 0, 0)
 	tok, err = p.peekIn(top, 1, 0)
 
 	if err != nil {
@@ -777,8 +776,6 @@ func (p *parser) parseEnumDecl() (*EnumDecl, *typ.Error) {
 
 func (p *parser) parseNamedField(g tty.Group, r, b int) (*NamedField, *typ.Error) {
 	res := &NamedField{Box: &tty.Row{}}
-	g.Add(res.Box, r, b)
-
 	tok, err := p.mustIn(lex.IDEN, res.Box, 0, 0)
 
 	if err != nil {
@@ -795,6 +792,7 @@ func (p *parser) parseNamedField(g tty.Group, r, b int) (*NamedField, *typ.Error
 	}
 
 	res.Typ = tsp
+	g.Add(res.Box, r, b)
 
 	return res, nil
 }

@@ -5,60 +5,73 @@
 
 typedef enum o2_reg
 {
-    O2_RSP = 0x0,
-    O2_RIP = 0x1,
-    O2_RBP = 0x2,
+    O2_RIP, // instruction
+    O2_RSP, // stack
+    O2_RBP, // base
+    O2_RDP, // data
+    O2_RPP, // package data
 } o2_reg;
 
 typedef enum o2_cmd
 {
-    JMP = 0x00,              // jmp <b:8> <o:4>
-    JAT = JMP | (0x01 << 5), // jat <o:4>
-    JIF = JMP | (0x02 << 5), // jif <b:8> <o:4>
-    NAT = JMP | (0x03 << 5), // nat <b:8>
+    JMP = 0x00,              // jmp <r:4> - jump
+    JIF = JMP | (0x01 << 5), // jif <r:4> - conditional jump
+    ALK = JMP | (0x02 << 5), // alk <a:8> <d:4> - absolute link
+    RLK = JMP | (0x03 << 5), // rlk <r:4> <d:4> - relative link
+    NLK = JMP | (0x04 << 5), // nat <a:8> <d:4> - native link
 
-    RET = 0x01, // ret
-    LEA = 0x02, // lea <b:8> <o:4>
+    RET = 0x01, // ret - return
+    LEA = 0x02, // lea <b:8> <o:4> - load address of mem[b + o]
 
-    PS = 0x03,
-    PB = PS | (0x0 << 5), // pb <i:1>
-    PW = PS | (0x1 << 5), // pw <i:4>
-    PD = PS | (0x2 << 5), // pd <i:8>
-    PA = PS | (0x3 << 5), // pa <s:4> <d:s>
+    PS = 0x03,            // push data on stack
+    PB = PS | (0x0 << 5), // pb <i:1> - push byte
+    PW = PS | (0x1 << 5), // pw <i:4> - push word (4)
+    PD = PS | (0x2 << 5), // pd <i:8> - push double (8)
+    PA = PS | (0x3 << 5), // pa <s:4> <d:s> - push any
 
-    MR = 0x04,
-    LR = MR | (0x0 << 5), // lr <r:1>
-    SR = MR | (0x1 << 5), // sr <r:1>
+    MR = 0x04,            // move data between registers and stack
+    LR = MR | (0x0 << 5), // lr <r:1> - load register
+    SR = MR | (0x1 << 5), // sr <r:1> - store register
 
-    LB = 0x05,
-    LW = 0x06,
-    LD = 0x07,
-    LA = 0x08,
+    LB = 0x05, // byte:   mem -> stack
+    LW = 0x06, // word:   mem -> stack
+    LD = 0x07, // double: mem -> stack
+    LA = 0x08, // any:    mem -> stack
 
-    SB = 0x09,
-    SW = 0x0a,
-    SD = 0x0b,
-    SA = 0x0c,
+    SB = 0x09, // byte:   stack -> mem
+    SW = 0x0a, // word:   stack -> mem
+    SD = 0x0b, // double: stack -> mem
+    SA = 0x0c, // any:    stack -> mem
 
-    LBI = LB, // lbi <b:8> <o:4>
-    LWI = LW, // lwi <b:8> <o:4>
-    LDI = LD, // ldi <b:8> <o:4>
-    LAI = LA, // lai <b:8> <o:4> <s:4>
+    LBI = LB | (0x0 << 5), // lbi <b:8> <o:4>
+    LWI = LW | (0x0 << 5), // lwi <b:8> <o:4>
+    LDI = LD | (0x0 << 5), // ldi <b:8> <o:4>
+    LAI = LA | (0x0 << 5), // lai <b:8> <o:4> <s:4>
 
-    SBI = SB, // sbi <b:8> <o:4>
-    SWI = SW, // swi <b:8> <o:4>
-    SDI = SD, // sdi <b:8> <o:4>
-    SAI = SA, // sai <b:8> <o:4> <s:4>
+    SBI = SB | (0x0 << 5), // sbi <b:8> <o:4>
+    SWI = SW | (0x0 << 5), // swi <b:8> <o:4>
+    SDI = SD | (0x0 << 5), // sdi <b:8> <o:4>
+    SAI = SA | (0x0 << 5), // sai <b:8> <o:4> <s:4>
 
-    LBS = LB | (1 << 5), // lbs <o:4>
-    LWS = LW | (1 << 5), // lws <o:4>
-    LDS = LD | (1 << 5), // lds <o:4>
-    LAS = LA | (1 << 5), // las <o:4> <s:4>
+    LBR = LB | (0x1 << 5), // lbr <r:1> <o:4>
+    LWR = LW | (0x1 << 5), // lwr <r:1> <o:4>
+    LDR = LD | (0x1 << 5), // ldr <r:1> <o:4>
+    LAR = LA | (0x1 << 5), // lar <r:1> <o:4> <s:4>
 
-    SBS = SB | (1 << 5), // sbs <o:4>
-    SWS = SW | (1 << 5), // sws <o:4>
-    SDS = SD | (1 << 5), // sds <o:4>
-    SAS = SA | (1 << 5), // sas <o:4> <s:4>
+    SBR = SB | (0x1 << 5), // sbr <r:1> <o:4>
+    SWR = SW | (0x1 << 5), // swr <r:1> <o:4>
+    SDR = SD | (0x1 << 5), // sdr <r:1> <o:4>
+    SAR = SA | (0x1 << 5), // sar <r:1> <o:4> <s:4>
+
+    LBS = LB | (0x2 << 5), // lbs <o:4>
+    LWS = LW | (0x2 << 5), // lws <o:4>
+    LDS = LD | (0x2 << 5), // lds <o:4>
+    LAS = LA | (0x2 << 5), // las <o:4> <s:4>
+
+    SBS = SB | (0x2 << 5), // sbs <o:4>
+    SWS = SW | (0x2 << 5), // sws <o:4>
+    SDS = SD | (0x2 << 5), // sds <o:4>
+    SAS = SA | (0x2 << 5), // sas <o:4> <s:4>
 
     CNV = 0x0d,
     I2U = CNV | (0x0 << 5), // i2u

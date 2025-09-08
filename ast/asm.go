@@ -1,13 +1,14 @@
-//go:build ignore
-
 package ast
 
 import (
 	"bytes"
 	"encoding/binary"
+
+	"github.com/paraskun/o2/co2"
+	"github.com/paraskun/o2/typ/mod"
 )
 
-func Assemble(p *Package) *img.Package {
+func Assemble(p *mod.Package) *co2.Package {
 	a := assembler{
 		pkg: &img.Package{
 			Name: p.Name,
