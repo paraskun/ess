@@ -67,19 +67,29 @@ func (t *typer) visitVarDecl(d *VarDecl) {
 	if _, err := t.env.Insert(d.Var.Lit, &typ.Object{
 		Snip: &tty.Snippet{File: t.src, Span: d.Box},
 		Typ:  d.Ini.Object().Typ,
+		Seg:  typ.Package,
+		Off:  t.pkg.Dsz,
 		Val:  d.Ini.Object().Val,
 	}); err != nil {
 		t.err += 1
 		err.Note(os.Stdout)
 	}
+
+	t.pkg.Dsz += d.Ini.Object().Size()
 }
 
 func (t *typer) visitFuncDecl(d *FuncDecl) {
 	t.ctx = d.Sig
 	d.Env = typ.NewEnv(t.env)
+
+	f := t.visitFuncSpec(d)
+
 	d.Obj = &typ.Object{
 		Snip: &tty.Snippet{File: t.src, Span: d.Box},
-		Typ:  t.visitFuncSpec(d),
+		Typ: &typ.Type{
+			Kind:  typ.DEC,
+			Extra: f,
+		},
 	}
 
 	if _, err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
@@ -89,7 +99,7 @@ func (t *typer) visitFuncDecl(d *FuncDecl) {
 
 	t.ctx = d.Box
 	t.env = d.Env
-	t.fun = d.Obj.Typ.Extra.(*typ.Func)
+	t.fun = f.Extra.(*typ.Func)
 
 	if d.Sub != nil {
 		d.Sub.Accept(t)
@@ -172,7 +182,10 @@ func (t *typer) visitTypeSpec(s *TypeSpec) {
 func (t *typer) visitStructDecl(d *StructDecl) {
 	d.Obj = &typ.Object{
 		Snip: &tty.Snippet{File: t.src, Span: d.Box},
-		Typ:  t.visitStructSpec(d),
+		Typ: &typ.Type{
+			Kind:  typ.DEC,
+			Extra: t.visitStructSpec(d),
+		},
 	}
 
 	if _, err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
@@ -220,7 +233,10 @@ func (t *typer) visitStructSpec(d *StructDecl) *typ.Type {
 func (t *typer) visitEnumDecl(d *EnumDecl) {
 	d.Obj = &typ.Object{
 		Snip: &tty.Snippet{File: t.src, Span: d.Box},
-		Typ:  t.visitEnumSpec(d),
+		Typ: &typ.Type{
+			Kind:  typ.DEC,
+			Extra: t.visitEnumSpec(d),
+		},
 	}
 
 	if _, err := t.env.Insert(d.Sym.Lit, d.Obj); err != nil {
@@ -481,11 +497,9 @@ func (t *typer) VisitExpr(u Expr) {
 	case *CallExpr:
 		sym, _ := t.env.Lookup(e.Sym.Lit)
 
-		if sym == nil || sym.Typ.Kind != typ.FUNC {
-			panic("undeclared function")
+		if sym == nil || sym.Typ.Kind != typ.DEC || sym.Typ.Extra.(*typ.Type).Kind != typ.FUNC {
+			panic("unknown function")
 		}
-
-		// TODO: multiple return values
 
 		e.Fun = sym
 
@@ -572,6 +586,8 @@ func (t *typer) visitBasicExpr(e *BasicExpr) {
 		e.Obj.Val, _ = strconv.ParseBool(e.Lex.Tok.Lit)
 	}
 
+	e.Obj.Off = t.pkg.Dsz
+	t.pkg.Dsz += e.Obj.Size()
 	t.pkg.Env.(*typ.Env).Insert(e.Lex.Tok.Lit, e.Obj)
 }
 

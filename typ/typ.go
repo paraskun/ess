@@ -58,6 +58,7 @@ type (
 		Name string // name, maybe empty
 
 		Typ *Type // type
+		Off int   // offset in bytes within group
 		Dec any   // node, ast.Node
 	}
 
@@ -67,6 +68,7 @@ type (
 		Arg []*Field
 		Ret *Field
 		Dec any // node, *ast.FuncDecl
+		Dsz int // data size
 	}
 
 	Struct struct {

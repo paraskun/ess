@@ -1,6 +1,7 @@
 package typ
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/fatih/color"
@@ -29,6 +30,7 @@ type Object struct {
 
 	Typ *Type   // inferred type
 	Seg Segment // runtime location
+	Off int     // offset
 	Val any     // compilation time value, maybe nil
 }
 
@@ -41,6 +43,26 @@ func (o *Object) Size() int {
 	}
 
 	return o.Typ.Size()
+}
+
+func (o *Object) Write(dst []byte) {
+	switch o.Typ.Kind {
+	case BOOL, I64, U64, F64:
+		bin, err := binary.Append(nil, binary.LittleEndian, o.Val)
+
+		if err != nil {
+			panic(err)
+		}
+
+		copy(dst, bin)
+	case STRUCT:
+		str := o.Typ.Extra.(Struct)
+		val := o.Val.(map[string]any)
+
+		for _, mem := range str.Mem {
+			
+		}
+	}
 }
 
 // Env is an Object storage.

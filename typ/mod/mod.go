@@ -202,6 +202,7 @@ type Package struct {
 
 	// Typing pass
 
+	Dsz int // data size
 	Env any // *typ.Env
 }
 

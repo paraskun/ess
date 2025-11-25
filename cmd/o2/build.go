@@ -46,6 +46,9 @@ var build = &cobra.Command{
 			return nil
 		}
 
+		fmt.Printf("%#v\n", p.Env)
+		fmt.Printf("%#v\n", ast.Assemble(p))
+
 		return nil
 	},
 }

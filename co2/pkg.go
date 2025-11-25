@@ -8,11 +8,13 @@ import (
 
 type Symbol struct {
 	Sym string
-	Off int
 	Seg typ.Segment
+	Off int
 }
 
-func (*Symbol) Write(w io.Writer) int
+func (*Symbol) Write(w io.Writer) int {
+	return 0
+}
 
 type Relocation struct {
 	Mod string
@@ -22,7 +24,9 @@ type Relocation struct {
 	Seg typ.Segment
 }
 
-func (*Relocation) Write(w io.Writer) int
+func (*Relocation) Write(w io.Writer) int {
+	return 0
+}
 
 type Package struct {
 	Text []byte
@@ -33,4 +37,6 @@ type Package struct {
 	Nat []byte
 }
 
-func (*Package) Write(w io.Writer) int
+func (*Package) Write(w io.Writer) int {
+	return 0
+}
